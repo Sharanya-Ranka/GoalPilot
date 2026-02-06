@@ -1,0 +1,4 @@
+*.db
+goal_app_db*.json
+
+__pycache__/
