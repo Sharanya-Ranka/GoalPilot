@@ -136,6 +136,49 @@ def log_tracker_endpoint(update: TrackerUpdate, goal_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/goals/{user_id}", response_model=list[Goal])
+def get_user_goals(user_id: str):
+    """
+    Retrieves all goals belonging to a specific user.
+    """
+    try:
+        goals = repo.get_goals_by_user(user_id)
+        if not goals:
+            return []
+        return goals
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/goals/{goal_id}")
+def update_goal_endpoint(goal_id: str, goal_update: Goal):
+    """
+    Updates an existing goal's metadata or specification.
+    """
+    try:
+        # Assuming repo.update_goal handles the logic of merging/replacing
+        success = repo.update_goal(goal_id, goal_update)
+        if not success:
+            raise HTTPException(status_code=404, detail="Goal not found")
+        return {"status": "success", "goal_id": goal_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/milestones/{milestone_id}")
+def update_milestone_endpoint(milestone_id: str, milestone_update: Milestone):
+    """
+    Updates a specific milestone's status, deadline, or description.
+    """
+    try:
+        success = repo.update_milestone(milestone_id, milestone_update)
+        if not success:
+            raise HTTPException(status_code=404, detail="Milestone not found")
+        return {"status": "success", "milestone_id": milestone_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
 

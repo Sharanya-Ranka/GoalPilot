@@ -96,7 +96,7 @@ class GoalRepository:
 
         for m in milestones:
             # Safety check: ensure 'trackers' list exists
-            trackers = m.get("trackers", [])
+            trackers = m.get("tracking", [])
             for t in trackers:
                 if t["id"] == update.tracker_id:
                     # Update the history!
@@ -139,3 +139,49 @@ class GoalRepository:
             (GoalQuery.user_id == user_id) & (GoalQuery.id == goal_id)
         )
         return results[0] if results else None
+
+    def get_goals_by_user(self, user_id: str) -> List[Goal]:
+        """
+        Retrieves all goals for a user and parses them back into Goal Pydantic models.
+        """
+        GoalQuery = Query()
+        results = self.goals_table.search(GoalQuery.user_id == user_id)
+        return [Goal.model_validate(res) for res in results]
+
+    def update_goal(self, goal_id: str, goal_update: Goal) -> bool:
+        """
+        Updates an existing goal document by replacing its content with the new model data.
+        """
+        GoalQuery = Query()
+        goal_data = goal_update.model_dump(mode="json")
+
+        # Ensure we don't accidentally change the ID if it's not in the update
+        updated_count = self.goals_table.update(goal_data, GoalQuery.id == goal_id)
+        return len(updated_count) > 0
+
+    def update_milestone(self, milestone_id: str, milestone_update: Milestone) -> bool:
+        """
+        Finds a milestone by its ID within any goal and updates its specific data.
+        """
+        GoalQuery = Query()
+        # We have to iterate through goals because milestones are nested in TinyDB
+        all_goals = self.goals_table.all()
+
+        for goal_doc in all_goals:
+            milestones = goal_doc.get("milestones", [])
+            updated = False
+
+            for i, ms in enumerate(milestones):
+                if ms["id"] == milestone_id:
+                    # Update the specific milestone in the list
+                    milestones[i] = milestone_update.model_dump(mode="json")
+                    updated = True
+                    break
+
+            if updated:
+                self.goals_table.update(
+                    {"milestones": milestones}, doc_ids=[goal_doc.doc_id]
+                )
+                return True
+
+        return False
