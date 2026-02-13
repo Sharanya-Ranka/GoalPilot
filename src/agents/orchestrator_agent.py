@@ -1,69 +1,148 @@
 # agent_graph.py
 import json
 import operator
+import logging
 from typing import Annotated, TypedDict, Optional, List
+
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, BaseMessage, HumanMessage
 from langgraph.graph import StateGraph, END
-from prompts.prompts import ORCHESTRATOR_PROMPT
-from agents.agent_utils import extract_json, fill_prompt_template, PlanState
+
+from prompts.prompts import ORCHESTRATOR_PROMPT, ORCHESTRATOR_CONTEXT
+from agents.agent_utils import (
+    extract_json,
+    fill_prompt_template,
+    PlanState,
+    AgentMessage,
+)
+import agents.agent_utils as agent_utils
 from persistence.tinydb_database import GoalRepository
+from persistence.dynamodb_database import DynamoDBHandler
+
+# Configure logging for better visibility in the console
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 
-def get_initial_context(state: PlanState):
-    repo = GoalRepository()
-    user_goals_results = repo.get_goals_for_user(state["user_id"])
-    user_goals = [
-        dict(what=g["what"], when=g["when"], why=g["why"], id=g["id"])
-        for g in user_goals_results
-    ]
-    # Start with the orchestrator prompt
-    sys_prompt = fill_prompt_template(ORCHESTRATOR_PROMPT, dict(user_goals=user_goals))
+def get_user_goals(user_id: str):
+    logger.info(f"Fetching goals for user_id: {user_id} from DynamoDB.")
+    try:
+        repo = DynamoDBHandler(region_name="us-east-1")
+        user_goals_results = repo.get_goals_for_user(user_id)
 
-    messages = [
-        SystemMessage(content=sys_prompt),
-    ]
+        user_goals_processed = [
+            dict(what=g.what, when=g.when, why=g.why, id=g.goal_id)
+            for g in user_goals_results
+        ]
 
-    return messages
-
-
-def get_next_state_using_intent(intent: dict, state: PlanState):
-    # Update the state based on the extracted intent
-    state["structured_data"]["intent"] = intent
-
-    if intent.get("intent") == "NEW_GOAL":
-        state["stage"] = "goal_formulator"
-    elif intent.get("intent") == "MOTIVATION":
-        state["stage"] = "motivator"
-    else:
-        state["stage"] = "orchestrator"  # Stay in orchestrator if unclear
-
-    return state
+        logger.info(
+            f"Successfully retrieved {len(user_goals_processed)} goals for user: {user_id}"
+        )
+        return user_goals_processed
+    except Exception as e:
+        logger.error(f"Failed to fetch goals for user {user_id}: {str(e)}")
+        return []
 
 
-# --- 4. Node: Goal Architect ---
-def run_orchestrator(state: PlanState):
-    this_call_messages = 0
-    if not state.get("current_context"):
-        state["current_context"] = get_initial_context(state)
-        this_call_messages += 1
+def get_next_agent_using_intent(intent: str):
+    next_agent = agent_utils.ORCHESTRATOR
+    if intent == "NEW_GOAL":
+        next_agent = agent_utils.GOAL_FORMULATOR
+    elif intent == "MOTIVATION":
+        next_agent = agent_utils.MOTIVATOR
+    elif intent == "DAY_PLANNING":
+        next_agent = agent_utils.PLANNER
+    elif intent == "PROGRESS_TRACKING":
+        next_agent = agent_utils.TRACKING_LOGGER
 
-    state["current_context"].append(state["last_user_message"])
-    this_call_messages += 1
+    logger.debug(f"Intent '{intent}' mapped to agent: {next_agent}")
+    return next_agent
 
-    llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.1)
-    response = llm.invoke(state["current_context"])
 
-    state["current_context"].append(response)
-    this_call_messages += 1
-    state["message_history"] += state["current_context"][-this_call_messages:]
-    breakpoint()
+def get_full_context(state: PlanState):
+    logger.info(f"Building full context for user: {state.get('user_id')}")
 
-    # Check for signal
-    intent = extract_json(response.content)
+    system_message = SystemMessage(
+        content=fill_prompt_template(ORCHESTRATOR_PROMPT, dict())
+    )
+
+    user_goals = get_user_goals(user_id=state["user_id"])
+    goals_context = SystemMessage(
+        content=fill_prompt_template(
+            ORCHESTRATOR_CONTEXT,
+            dict(user_goals=user_goals),
+        )
+    )
+
+    context_till_now = state.get("current_context", [])
+    user_messages = (
+        [state["last_user_message"]] if state["last_user_message"].content else []
+    )
+
+    full_context = [system_message, goals_context] + context_till_now + user_messages
+
+    logger.debug(f"Total message count in context: {len(full_context)}")
+    # Note: Keep the breakpoint for manual debugging if needed,
+    # but logging often replaces the need for it.
+    # breakpoint()
+
+    return full_context, state
+
+
+def update_state_on_response(state: PlanState, response: BaseMessage):
+    logger.info("Processing LLM response to update state.")
+
+    try:
+        response_json = extract_json(response.content)
+        logger.debug(f"Extracted JSON from response: {response_json}")
+    except Exception as e:
+        logger.error(
+            f"Failed to extract JSON from LLM response: {response.content}. Error: {e}"
+        )
+        response_json = {}
+
+    intent = response_json.get("intent")
+    goal_id = response_json.get("goal_id")
+    to_user = response_json.get("to_user")
+
+    if to_user:
+        logger.info(f"Adding message to user queue: {to_user[:50]}...")
+        state["to_user"].append(AgentMessage(agent="Orchestrator", message=to_user))
+
     if intent:
-        updated_state = get_next_state_using_intent(intent, state)
-        state["current_context"] = []  # Clear context for next agent
-        return updated_state
+        old_stage = state.get("stage", "None")
+        state["stage"] = get_next_agent_using_intent(intent)
+        logger.info(
+            f"State transition: {old_stage} -> {state['stage']} based on intent: {intent}"
+        )
+
+    if goal_id:
+        logger.debug(f"Setting active goal_id in state: {goal_id}")
+        state["structured_data"]["goal_id"] = goal_id
 
     return state
+
+
+def run_orchestrator(state: PlanState):
+    logger.info("--- Starting Orchestrator Node ---")
+
+    context, updated_state = get_full_context(state)
+
+    logger.info("Invoking LLM (gpt-4.1-mini)...")
+    try:
+        llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.1)
+        response = llm.invoke(context)
+        logger.info("LLM response received successfully.")
+    except Exception as e:
+        logger.error(f"LLM invocation failed: {str(e)}")
+        # You might want to handle this by returning to a safety state
+        return state
+
+    new_state = update_state_on_response(updated_state, response)
+
+    logger.info(
+        f"--- Finished Orchestrator Node. Next stage: {new_state.get('stage')} ---"
+    )
+    return new_state
