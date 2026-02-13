@@ -1,77 +1,100 @@
-# agent_graph.py
-import json
-import operator
-from typing import Annotated, TypedDict, Optional, List
+import logging
+from typing import List
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import SystemMessage, BaseMessage, HumanMessage
-from langgraph.graph import StateGraph, END
+from langchain_core.messages import SystemMessage, BaseMessage
 from prompts.prompts import GOAL_FORMULATOR_PROMPT
-from agents.agent_utils import extract_json, fill_prompt_template, PlanState
-from persistence.tinydb_database import GoalRepository
-from schemas.core import Goal, Milestone
+from agents.agent_utils import (
+    extract_json,
+    fill_prompt_template,
+    PlanState,
+    AgentMessage,
+)
+import agents.agent_utils as agent_utils
+from persistence.dynamodb_database import DynamoDBHandler
+from schemas.core_v2 import Goal
+
+# Setup logging
+logger = logging.getLogger(__name__)
 
 
 def commit_goal(goal: dict, state: PlanState):
+    repo = DynamoDBHandler(region_name="us-east-1")
     goal_obj = Goal(
-        what=goal.get("what"),
-        when=goal.get("timeline"),
-        why=goal.get("why"),
-        user_id=state["user_id"],
+        user_id=state["user_id"], what=goal["what"], when=goal["when"], why=goal["why"]
     )
-
-    repo = GoalRepository()
-
     repo.create_goal(goal_obj)
-
+    logger.info(f"Goal saved to DynamoDB for user {state['user_id']}")
     return goal_obj
 
 
-def get_initial_context(state: PlanState):
-
-    # Start with the orchestrator prompt
-    sys_prompt = fill_prompt_template(GOAL_FORMULATOR_PROMPT, {})
-
-    messages = [
-        SystemMessage(content=sys_prompt),
-    ]
-
-    return messages
+def get_next_agent_using_intent(intent: str):
+    next_agent = (
+        agent_utils.ORCHESTRATOR
+        if intent == "ORCHESTRATOR"
+        else agent_utils.GOAL_FORMULATOR
+    )
+    logger.debug(f"Routing to: {next_agent}")
+    return next_agent
 
 
-def update_state_on_completion(goal: Goal, state: PlanState):
-    # Update the state based on the extracted status
+def get_full_context(state: PlanState):
+    system_message = SystemMessage(
+        content=fill_prompt_template(GOAL_FORMULATOR_PROMPT, {})
+    )
 
-    state["structured_data"]["goal"] = goal
-    state["stage"] = "milestone_formulator"
-    state["current_context"] = []  # Clear context for next agent
+    context_till_now = state.get("current_context", [])
+    user_messages = [state["last_user_message"]] if state["last_user_message"] else []
 
-    return state
+    # Update local state context
+    state["current_context"].extend(user_messages)
+
+    full_context = [system_message] + context_till_now + user_messages
+    return full_context, state
 
 
-# --- 4. Node: Goal Architect ---
-def run_goal_formulator(state: PlanState):
-    this_call_messages = 0
-    if not state.get("current_context"):
-        state["current_context"] = get_initial_context(state)
-        this_call_messages += 1
+def update_state_on_response(state: PlanState, response: BaseMessage):
+    try:
+        response_json = extract_json(response.content)
+    except Exception as e:
+        logger.error(f"JSON extraction failed: {e}")
+        response_json = {}
 
-    state["current_context"].append(state["last_user_message"])
-    this_call_messages += 1
-
-    llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.1)
-    response = llm.invoke(state["current_context"])
-
-    breakpoint()
+    intent = response_json.get("intent")
+    is_complete = response_json.get("is_complete", False)
+    goal_details = response_json.get("goal_details")
+    to_user = response_json.get("to_user")
 
     state["current_context"].append(response)
-    this_call_messages += 1
-    state["message_history"] += state["current_context"][-this_call_messages:]
 
-    # Check for signal
-    goal = extract_json(response.content)
-    if goal:
-        goal_obj = commit_goal(goal, state)
-        updated_state = update_state_on_completion(goal_obj, state)
-        return updated_state
+    if to_user:
+        state["to_user"].append(
+            AgentMessage(agent=agent_utils.GOAL_FORMULATOR, message=to_user)
+        )
+
+    if intent:
+        state["stage"] = get_next_agent_using_intent(intent)
+
+    if is_complete and goal_details:
+        goal = commit_goal(goal_details, state)
+        state["structured_data"]["goal"] = goal
+        state["stage"] = agent_utils.MILESTONE_FORMULATOR
+        state["current_context"] = []  # Transitioning to new agent
+        logger.info("Goal completion detected. Transitioning to Milestone Formulator.")
 
     return state
+
+
+def run_goal_formulator(state: PlanState):
+    logger.info(f"--- Node: Goal Formulator | User: {state.get('user_id')} ---")
+
+    context, updated_state = get_full_context(state)
+    llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.1)
+
+    try:
+        response = llm.invoke(context)
+        new_state = update_state_on_response(updated_state, response)
+        logger.info(f"Transitioning to stage: {new_state.get('stage')}")
+        return new_state
+    except Exception as e:
+        logger.error(f"LLM Error: {e}")
+        return state

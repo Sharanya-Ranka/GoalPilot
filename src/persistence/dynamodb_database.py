@@ -113,6 +113,11 @@ class DynamoDBHandler:
         items = response.get("Items", [])
         return items
 
+    def get_goals_for_user(self, user_id: str) -> List[Goal]:
+        """Fetches all goals for a user and parses them into Goal Pydantic models."""
+        items = self._query_all_by_user(self.goals_table, user_id)
+        return [Goal.from_db_format(item) for item in items]
+
     # --- 4. Updates (Overwrite Strategy) ---
     # In DynamoDB + Pydantic, it's often safer to PUT (overwrite) the whole item
     # than to try and PATCH specific fields, unless you have massive documents.

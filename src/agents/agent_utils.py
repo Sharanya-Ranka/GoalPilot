@@ -14,6 +14,21 @@ class PlanState(TypedDict):
     user_id: str
     structured_data: dict
     stage: str
+    to_user: list
+
+
+class AgentMessage(TypedDict):
+    agent: str
+    message: str
+
+
+# Agent types
+ORCHESTRATOR = "orchestrator"
+GOAL_FORMULATOR = "goal_formulator"
+MILESTONE_FORMULATOR = "milestone_formulator"
+MOTIVATOR = "motivator"
+PLANNER = "planner"
+TRACKING_LOGGER = "tracking_logger"
 
 
 def initialize_state() -> PlanState:
@@ -24,6 +39,7 @@ def initialize_state() -> PlanState:
         user_id="",  # In real app, this would come from auth/session
         structured_data={},
         stage="orchestrator",  # Start at orchestrator
+        to_user=[],
     )
 
 

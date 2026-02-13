@@ -16,6 +16,12 @@ from schemas.core import (
 )
 
 
+def get_active_metrics(user_id: str):
+    repo = GoalRepository()
+    active_metrics = repo.get_active_metrics_for_user(user_id)
+    return active_metrics
+
+
 def get_metric(metric_data: dict):
     if metric_data.get("type").lower() == "target":
         return TargetMetric(**metric_data)
@@ -55,7 +61,7 @@ def get_initial_context(state: PlanState):
 
     # Start with the orchestrator prompt
     sys_prompt = fill_prompt_template(
-        MILESTONE_FORMULATOR_PROMPT, dict(goal_info=state["structured_data"]["goal"])
+        PLANNING_PROMPT, dict(goal_info=state["structured_data"]["goal"])
     )
 
     messages = [

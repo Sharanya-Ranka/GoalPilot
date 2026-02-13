@@ -81,6 +81,8 @@ def get_full_context(state: PlanState):
         [state["last_user_message"]] if state["last_user_message"].content else []
     )
 
+    state["current_context"].extend(user_messages)
+
     full_context = [system_message, goals_context] + context_till_now + user_messages
 
     logger.debug(f"Total message count in context: {len(full_context)}")
@@ -109,7 +111,9 @@ def update_state_on_response(state: PlanState, response: BaseMessage):
 
     if to_user:
         logger.info(f"Adding message to user queue: {to_user[:50]}...")
-        state["to_user"].append(AgentMessage(agent="Orchestrator", message=to_user))
+        state["to_user"].append(
+            AgentMessage(agent=agent_utils.ORCHESTRATOR, message=to_user)
+        )
 
     if intent:
         old_stage = state.get("stage", "None")
