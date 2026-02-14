@@ -26,7 +26,7 @@ class AgentMessage(TypedDict):
 ORCHESTRATOR = "orchestrator"
 GOAL_FORMULATOR = "goal_formulator"
 MILESTONE_FORMULATOR = "milestone_formulator"
-MOTIVATOR = "motivator"
+RESILIENCE_COACH = "resilience_coach"
 PLANNER = "planner"
 TRACKING_LOGGER = "tracking_logger"
 

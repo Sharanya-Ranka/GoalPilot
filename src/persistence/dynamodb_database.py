@@ -118,6 +118,15 @@ class DynamoDBHandler:
         items = self._query_all_by_user(self.goals_table, user_id)
         return [Goal.from_db_format(item) for item in items]
 
+    def get_milestones(self, user_id: str, goal_id: str) -> Dict[str, Any]:
+        """Fetches milestones for a user and given goal."""
+        milestones = self._query_all_by_user(self.milestones_table, user_id)
+        milestones = [
+            Milestone.from_db_format(m) for m in milestones if m["goal_id"] == goal_id
+        ]
+
+        return milestones
+
     # --- 4. Updates (Overwrite Strategy) ---
     # In DynamoDB + Pydantic, it's often safer to PUT (overwrite) the whole item
     # than to try and PATCH specific fields, unless you have massive documents.
