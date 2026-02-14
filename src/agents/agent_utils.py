@@ -6,6 +6,11 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, BaseMessage, HumanMessage
 
 
+class AgentMessage(TypedDict):
+    agent: str
+    message: str
+
+
 # --- 1. Define the State ---
 class PlanState(TypedDict):
     message_history: list[BaseMessage]
@@ -14,12 +19,7 @@ class PlanState(TypedDict):
     user_id: str
     structured_data: dict
     stage: str
-    to_user: list
-
-
-class AgentMessage(TypedDict):
-    agent: str
-    message: str
+    to_user: List[AgentMessage]
 
 
 # Agent types

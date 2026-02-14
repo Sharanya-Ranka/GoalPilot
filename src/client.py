@@ -43,7 +43,7 @@ def chat_with_agent(args):
 
         payload = {"message": user_input, "thread_id": thread_id}
         try:
-            response = requests.post(f"{SERVER_URL}/chat", json=payload)
+            response = requests.post(f"{SERVER_URL}/ai/chat", json=payload)
             if response.status_code == 200:
                 data = response.json()
                 print(f"[AGENT]: {data['response']}")

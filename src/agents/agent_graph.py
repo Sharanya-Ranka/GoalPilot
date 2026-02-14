@@ -1,4 +1,3 @@
-# agent_graph.py
 import json
 import operator
 from typing import Annotated, TypedDict, Optional, List
@@ -6,50 +5,49 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, BaseMessage, HumanMessage
 from langgraph.graph import StateGraph, END
 from agents.agent_utils import extract_json, PlanState
+import agents.agent_utils as agent_utils
 from agents.goal_agent import run_goal_formulator
-from agents.motivator_agent import run_motivator
+from agents.motivator_agent import run_resilience_coach
 from agents.milestone_agent import run_milestone_formulator
 from agents.orchestrator_agent import run_orchestrator
 
+# --- Routing Functions ---
+
 
 def route_from_orchestrator(state: PlanState):
-    if state["stage"] == "goal_formulator":
-        return "goal_formulator"
-    elif state["stage"] == "motivator":
-        return "motivator"
-
-    return END
+    stage = state.get("stage", agent_utils.ORCHESTRATOR)
+    # If the next stage is still orchestrator, stop and wait for user
+    if stage == agent_utils.ORCHESTRATOR:
+        return END
+    return stage
 
 
 def route_from_goal_formulator(state: PlanState):
-    if state["stage"] == "milestone_formulator":
-        return "milestone_formulator"
-    return END
+    stage = state.get("stage", END)
+    # If the next stage is still goal_formulator, stop and wait for user
+    if stage == agent_utils.GOAL_FORMULATOR:
+        return END
+    return stage
 
 
 def route_from_milestone_formulator(state: PlanState):
-    if state["stage"] == "orchestrator":
-        return "orchestrator"
-    return END
+    stage = state.get("stage", END)
+    # If the next stage is still milestone_formulator, stop and wait for user
+    if stage == agent_utils.MILESTONE_FORMULATOR:
+        return END
+    return stage
 
 
 def route_from_motivator(state: PlanState):
-    if state["stage"] == "orchestrator":
-        return "orchestrator"
-    return END
+    stage = state.get("stage", END)
+    # If the next stage is still resilience_coach (motivator), stop and wait for user
+    if stage == agent_utils.RESILIENCE_COACH:
+        return END
+    return stage
 
 
 def entry_gate(state: PlanState):
-    # breakpoint()
-    if state.get("stage") == "orchestrator":
-        return "orchestrator"
-    elif state.get("stage") == "goal_formulator":
-        return "goal_formulator"
-    elif state.get("stage") == "milestone_formulator":
-        return "milestone_formulator"
-    elif state.get("stage") == "motivator":
-        return "motivator"
-    return "orchestrator"  # Default entry point
+    return state.get("stage", agent_utils.ORCHESTRATOR)
 
 
 # --- 3. The Factory Function ---
@@ -60,55 +58,59 @@ def build_goal_app(checkpointer):
     """
     workflow = StateGraph(PlanState)
 
-    workflow.add_node("goal_formulator", run_goal_formulator)
-    workflow.add_node("milestone_formulator", run_milestone_formulator)
-    workflow.add_node("motivator", run_motivator)
-    workflow.add_node("orchestrator", run_orchestrator)
+    # Node Definitions
+    workflow.add_node(agent_utils.GOAL_FORMULATOR, run_goal_formulator)
+    workflow.add_node(agent_utils.MILESTONE_FORMULATOR, run_milestone_formulator)
+    workflow.add_node(agent_utils.RESILIENCE_COACH, run_resilience_coach)
+    workflow.add_node(agent_utils.ORCHESTRATOR, run_orchestrator)
 
+    # Entry Point
     workflow.set_conditional_entry_point(
         entry_gate,
         {
-            "goal_formulator": "goal_formulator",
-            "milestone_formulator": "milestone_formulator",
-            "motivator": "motivator",
-            "orchestrator": "orchestrator",
+            agent_utils.ORCHESTRATOR: agent_utils.ORCHESTRATOR,
+            agent_utils.MILESTONE_FORMULATOR: agent_utils.MILESTONE_FORMULATOR,
+            agent_utils.RESILIENCE_COACH: agent_utils.RESILIENCE_COACH,
+            agent_utils.GOAL_FORMULATOR: agent_utils.GOAL_FORMULATOR,
         },
     )
 
-    # Edges
+    # Edges - Using Constants for both Node Keys and Target Mapping
     workflow.add_conditional_edges(
-        "orchestrator",
+        agent_utils.ORCHESTRATOR,
         route_from_orchestrator,
         {
             END: END,
-            "goal_formulator": "goal_formulator",
-            "motivator": "motivator",
-        },
-    )
-    workflow.add_conditional_edges(
-        "goal_formulator",
-        route_from_goal_formulator,
-        {
-            END: END,
-            "milestone_formulator": "milestone_formulator",
-        },
-    )
-    workflow.add_conditional_edges(
-        "milestone_formulator",
-        route_from_milestone_formulator,
-        {
-            END: END,
-            "orchestrator": "orchestrator",
-        },
-    )
-    workflow.add_conditional_edges(
-        "motivator",
-        route_from_motivator,
-        {
-            END: END,
-            "orchestrator": "orchestrator",
+            agent_utils.GOAL_FORMULATOR: agent_utils.GOAL_FORMULATOR,
+            agent_utils.RESILIENCE_COACH: agent_utils.RESILIENCE_COACH,
         },
     )
 
-    # Compile with the passed checkpointer
+    workflow.add_conditional_edges(
+        agent_utils.GOAL_FORMULATOR,
+        route_from_goal_formulator,
+        {
+            END: END,
+            agent_utils.MILESTONE_FORMULATOR: agent_utils.MILESTONE_FORMULATOR,
+        },
+    )
+
+    workflow.add_conditional_edges(
+        agent_utils.MILESTONE_FORMULATOR,
+        route_from_milestone_formulator,
+        {
+            END: END,
+            agent_utils.ORCHESTRATOR: agent_utils.ORCHESTRATOR,
+        },
+    )
+
+    workflow.add_conditional_edges(
+        agent_utils.RESILIENCE_COACH,
+        route_from_motivator,
+        {
+            END: END,
+            agent_utils.ORCHESTRATOR: agent_utils.ORCHESTRATOR,
+        },
+    )
+
     return workflow.compile(checkpointer=checkpointer)

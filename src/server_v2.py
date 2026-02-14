@@ -1,4 +1,5 @@
 # server.py
+import boto3
 import uvicorn
 from fastapi import FastAPI, HTTPException, Depends, APIRouter, Query
 from typing import List, Optional
@@ -7,6 +8,7 @@ from agents.agent_utils import initialize_state
 from langgraph_checkpoint_aws import DynamoDBSaver
 from langgraph.graph import StateGraph
 from langchain_core.messages import HumanMessage
+import logging
 
 # --- Imports ---
 # Assumes you have the updated DynamoDBHandler and Pydantic models in these files
@@ -24,9 +26,21 @@ from schemas.core_v2 import (
 app = FastAPI(title="Goal Tracker API", version="2.0")
 
 
+my_session = boto3.session.Session(
+    region_name="us-east-1",  # Specify the region
+)
+
 # Initialize the saver (make sure you've created the table first or set logic to create it)
-checkpointer = DynamoDBSaver(table_name="my_graph_checkpoints")
+checkpointer = DynamoDBSaver(
+    table_name="my_graph_checkpoints1",
+    region_name="us-east-1",
+    enable_checkpoint_compression=True,
+    session=my_session,
+)
 agent_graph = build_goal_app(checkpointer)
+logging.getLogger(
+    "langgraph_checkpoint_aws.checkpoint.dynamodb.unified_repository"
+).setLevel(logging.WARNING)
 
 
 # --- Dependency Injection ---
@@ -182,12 +196,15 @@ def agent_chat(req: UserRequest):
             {
                 "last_user_message": HumanMessage(content=req.message),
                 "user_id": req.thread_id,
+                "to_user": [],
             },
             config,
         )
 
+        # breakpoint()
+
         return {
-            "response": result["current_context"][-1].content,
+            "response": result["to_user"],
             "thread_id": req.thread_id,
         }
     except Exception as e:
@@ -209,4 +226,4 @@ def health_check():
 
 
 if __name__ == "__main__":
-    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("server_v2:app", host="0.0.0.0", port=8000, reload=True)

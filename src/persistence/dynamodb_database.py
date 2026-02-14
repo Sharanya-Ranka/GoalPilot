@@ -2,7 +2,7 @@ import boto3
 from boto3.dynamodb.conditions import Key, Attr
 from typing import List, Dict, Optional, Any
 from concurrent.futures import ThreadPoolExecutor
-from src.schemas.core_v2 import Goal, Milestone, Tracker, TrackerUpdate, LogEntry
+from schemas.core_v2 import Goal, Milestone, Tracker, TrackerUpdate, LogEntry
 
 
 class DynamoDBHandler:

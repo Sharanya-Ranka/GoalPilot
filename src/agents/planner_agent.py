@@ -114,6 +114,7 @@ def run_planner_agent(state: PlanState):
     logger.info(f"--- Node: Planner Agent | User: {state.get('user_id')} ---")
 
     context, updated_state = get_full_context(state)
+
     llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.1)
 
     try:

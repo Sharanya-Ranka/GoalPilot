@@ -48,10 +48,10 @@ def get_user_goals(user_id: str):
 
 def get_next_agent_using_intent(intent: str):
     next_agent = agent_utils.ORCHESTRATOR
-    if intent == "NEW_GOAL":
+    if intent == "GOAL_FORMATION":
         next_agent = agent_utils.GOAL_FORMULATOR
     elif intent == "MOTIVATION":
-        next_agent = agent_utils.MOTIVATOR
+        next_agent = agent_utils.RESILIENCE_COACH
     elif intent == "DAY_PLANNING":
         next_agent = agent_utils.PLANNER
     elif intent == "PROGRESS_TRACKING":
@@ -131,19 +131,19 @@ def update_state_on_response(state: PlanState, response: BaseMessage):
 
 def run_orchestrator(state: PlanState):
     logger.info("--- Starting Orchestrator Node ---")
-
+    # breakpoint()
     context, updated_state = get_full_context(state)
-
+    logger.info(f"Context prepared for LLM: {[msg.content for msg in context]}")
     logger.info("Invoking LLM (gpt-4.1-mini)...")
     try:
         llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.1)
         response = llm.invoke(context)
-        logger.info("LLM response received successfully.")
+        logger.info(f"LLM response received successfully.\n{response.content}")
     except Exception as e:
         logger.error(f"LLM invocation failed: {str(e)}")
         # You might want to handle this by returning to a safety state
         return state
-
+    # breakpoint()
     new_state = update_state_on_response(updated_state, response)
 
     logger.info(

@@ -21,7 +21,7 @@ def get_goal_and_active_milestones(state: PlanState):
     user_id = state["user_id"]
 
     # Extract goal_id from the structured intent data
-    target_goal_id = state["structured_data"].get("intent", {}).get("goal_id")
+    target_goal_id = state["structured_data"].get("goal_id")
 
     logger.info(f"Fetching goal {target_goal_id} and milestones for user {user_id}")
 
@@ -112,10 +112,14 @@ def run_resilience_coach(state: PlanState):
     logger.info(f"--- Node: Resilience Coach | User: {state.get('user_id')} ---")
 
     context, updated_state = get_full_context(state)
+    logger.info(
+        f"Context prepared for LLM: {"\n\n".join([msg.content for msg in context])}"
+    )
     llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.1)
 
     try:
         response = llm.invoke(context)
+        logger.info(f"LLM Response: {response.content}")
         new_state = update_state_on_response(updated_state, response)
         logger.info(f"Coach node complete. Next stage: {new_state.get('stage')}")
         return new_state

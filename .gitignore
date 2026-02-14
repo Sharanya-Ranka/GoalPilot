@@ -4,3 +4,5 @@ goal_app_db*.json
 __pycache__/
 
 ideas.txt
+
+commands.txt

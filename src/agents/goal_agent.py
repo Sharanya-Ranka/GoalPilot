@@ -87,11 +87,15 @@ def update_state_on_response(state: PlanState, response: BaseMessage):
 def run_goal_formulator(state: PlanState):
     logger.info(f"--- Node: Goal Formulator | User: {state.get('user_id')} ---")
 
+    # breakpoint()
+
     context, updated_state = get_full_context(state)
+    logger.info(f"Context prepared for LLM: {[msg.content for msg in context]}")
     llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.1)
 
     try:
         response = llm.invoke(context)
+        logger.info(f"LLM Response: {response.content}")
         new_state = update_state_on_response(updated_state, response)
         logger.info(f"Transitioning to stage: {new_state.get('stage')}")
         return new_state
