@@ -12,6 +12,7 @@ from agents.agent_utils import (
 import agents.agent_utils as agent_utils
 from persistence.dynamodb_database import DynamoDBHandler
 from schemas.core_v2 import Goal
+from llms.openai_api import low_reasoning_gpt5mini
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -90,15 +91,12 @@ def run_goal_formulator(state: PlanState):
     # breakpoint()
 
     context, updated_state = get_full_context(state)
-    logger.info(f"Context prepared for LLM: {[msg.content for msg in context]}")
-    llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.1)
+    # logger.info(f"Context prepared for LLM: {[msg.content for msg in context]}")
+    response = low_reasoning_gpt5mini(context)
 
-    try:
-        response = llm.invoke(context)
-        logger.info(f"LLM Response: {response.content}")
-        new_state = update_state_on_response(updated_state, response)
-        logger.info(f"Transitioning to stage: {new_state.get('stage')}")
-        return new_state
-    except Exception as e:
-        logger.error(f"LLM Error: {e}")
+    if response == None:
         return state
+
+    new_state = update_state_on_response(updated_state, response)
+    logger.info(f"Transitioning to stage: {new_state.get('stage')}")
+    return new_state

@@ -82,7 +82,9 @@ def build_goal_app(checkpointer):
         {
             END: END,
             agent_utils.GOAL_FORMULATOR: agent_utils.GOAL_FORMULATOR,
+            agent_utils.MILESTONE_FORMULATOR: agent_utils.MILESTONE_FORMULATOR,
             agent_utils.RESILIENCE_COACH: agent_utils.RESILIENCE_COACH,
+            # agent_utils.PLANNER: agent_utils.PLANNER,
         },
     )
 

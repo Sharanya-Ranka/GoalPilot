@@ -2,7 +2,7 @@ import boto3
 from boto3.dynamodb.conditions import Key, Attr
 from typing import List, Dict, Optional, Any
 from concurrent.futures import ThreadPoolExecutor
-from schemas.core_v2 import Goal, Milestone, Tracker, TrackerUpdate, LogEntry
+from schemas.core_v2 import Goal, Milestone, Tracker, LogEntry
 
 
 class DynamoDBHandler:
@@ -118,11 +118,14 @@ class DynamoDBHandler:
         items = self._query_all_by_user(self.goals_table, user_id)
         return [Goal.from_db_format(item) for item in items]
 
-    def get_milestones(self, user_id: str, goal_id: str) -> Dict[str, Any]:
-        """Fetches milestones for a user and given goal."""
+    def get_milestones(self, user_id: str, goal_id: str = None) -> Dict[str, Any]:
+        """Fetches milestones for a user and given goal. If no goal is given, fetch all"""
         milestones = self._query_all_by_user(self.milestones_table, user_id)
+
         milestones = [
-            Milestone.from_db_format(m) for m in milestones if m["goal_id"] == goal_id
+            Milestone.from_db_format(m)
+            for m in milestones
+            if not goal_id or m["goal_id"] == goal_id
         ]
 
         return milestones

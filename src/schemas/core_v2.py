@@ -1,11 +1,12 @@
 # schemas.py
-from typing import List, Dict, Any, Optional, Literal, Union
+from typing import List, Dict, Any, Optional, Literal, Union, Tuple
 from pydantic import BaseModel, Field
 from typing_extensions import Annotated
 import uuid
 from datetime import datetime
 import secrets
 import string
+from decimal import Decimal
 
 
 def generate_real_id():
@@ -53,7 +54,7 @@ TrackerConfig = Annotated[
 
 
 # --- 2. Main Tracker Model ---
-class Tracker(BaseModel):
+class OldTracker(BaseModel):
     # Unencrypted Index/Link Fields
     user_id: str
     milestone_id: str
@@ -81,6 +82,56 @@ class Tracker(BaseModel):
             tracker_id=data["tracker_id"],
             # Pydantic's Union Discriminator handles the type-casting automatically
             config=data.get("tracker_json"),
+        )
+
+
+class SuccessLogic(BaseModel):
+    """Encapsulates the 'finisher' condition for the milestone."""
+
+    type: Literal["STREAK", "TOTAL_COUNT", "ACHIEVED"]
+    count: int
+
+
+class Tracker(BaseModel):
+    # --- Indexing & Linkage ---
+    user_id: str
+    milestone_id: str
+    tracker_id: str = Field(default_factory=generate_id)
+
+    # --- Metric Configuration ---
+    metric_type: Literal["SUM", "LATEST", "BOOLEAN"]
+    unit: str
+    log_prompt: str
+
+    # [min, max] -> Use None/null for open bounds
+    target_range: Tuple[Optional[Decimal], Optional[Decimal]]
+
+    cadence: Literal["DAILY", "WEEKLY", "MONTHLY", "ONCE"]
+    window_days: Optional[int] = None
+
+    # --- Nested Success Logic (No Unions!) ---
+    success_logic: SuccessLogic
+
+    def to_db_format(self) -> Dict[str, Any]:
+        """Prepares the tracker for encrypted/JSON storage."""
+        # We dump the entire model but keep indexing fields separate
+        full_dump = self.model_dump()
+        return {
+            "user_id": full_dump.pop("user_id"),
+            "milestone_id": full_dump.pop("milestone_id"),
+            "tracker_id": full_dump.pop("tracker_id"),
+            # The remaining fields (including nested success_logic) go here
+            "tracker_json": full_dump,
+        }
+
+    @classmethod
+    def from_db_format(cls, data: Dict[str, Any]) -> "Tracker":
+        """Reconstructs the tracker from a DB record."""
+        return cls(
+            user_id=data["user_id"],
+            milestone_id=data["milestone_id"],
+            tracker_id=data["tracker_id"],
+            **data["tracker_json"]
         )
 
 

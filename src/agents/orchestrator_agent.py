@@ -18,6 +18,7 @@ from agents.agent_utils import (
 import agents.agent_utils as agent_utils
 from persistence.tinydb_database import GoalRepository
 from persistence.dynamodb_database import DynamoDBHandler
+from llms.openai_api import low_reasoning_gpt5mini
 
 # Configure logging for better visibility in the console
 logging.basicConfig(
@@ -50,6 +51,8 @@ def get_next_agent_using_intent(intent: str):
     next_agent = agent_utils.ORCHESTRATOR
     if intent == "GOAL_FORMATION":
         next_agent = agent_utils.GOAL_FORMULATOR
+    elif intent == "MILESTONE_FORMATION":
+        next_agent = agent_utils.MILESTONE_FORMULATOR
     elif intent == "MOTIVATION":
         next_agent = agent_utils.RESILIENCE_COACH
     elif intent == "DAY_PLANNING":
@@ -133,17 +136,12 @@ def run_orchestrator(state: PlanState):
     logger.info("--- Starting Orchestrator Node ---")
     # breakpoint()
     context, updated_state = get_full_context(state)
-    logger.info(f"Context prepared for LLM: {[msg.content for msg in context]}")
-    logger.info("Invoking LLM (gpt-4.1-mini)...")
-    try:
-        llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.1)
-        response = llm.invoke(context)
-        logger.info(f"LLM response received successfully.\n{response.content}")
-    except Exception as e:
-        logger.error(f"LLM invocation failed: {str(e)}")
-        # You might want to handle this by returning to a safety state
+    # logger.info(f"Context prepared for LLM: {[msg.content for msg in context]}")
+    response = low_reasoning_gpt5mini(context)
+
+    if response == None:
         return state
-    # breakpoint()
+        # breakpoint()
     new_state = update_state_on_response(updated_state, response)
 
     logger.info(

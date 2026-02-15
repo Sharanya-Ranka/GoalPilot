@@ -28,7 +28,7 @@ def chat_with_agent(args):
     """
     Renamed from create_goal. Interactive Chat Loop.
     """
-    thread_id = "user_2"
+    thread_id = args.user_id
     print(f"--- CHAT SESSION STARTED ({SERVER_URL}) ---")
     print(f"Session ID: {thread_id}")
 
@@ -46,7 +46,9 @@ def chat_with_agent(args):
             response = requests.post(f"{SERVER_URL}/ai/chat", json=payload)
             if response.status_code == 200:
                 data = response.json()
-                print(f"[AGENT]: {data['response']}")
+                print(f"[AGENT]:")
+                for ar in data["response"]:
+                    print(f"{ar['agent']}\n{ar['message']}", end="\n\n")
             else:
                 print(f"[ERROR {response.status_code}]: {response.text}")
         except requests.exceptions.ConnectionError:
@@ -57,7 +59,7 @@ def track_progress(args):
     """
     Iterates through active milestones and logs tracker updates.
     """
-    user_id = "user_2"  # Should ideally be an arg or config
+    user_id = "user_3"  # Should ideally be an arg or config
     print(f"--- DAILY TRACKING FOR {user_id} ---")
 
     # 1. Get all goals for the user
@@ -125,6 +127,9 @@ def main():
 
     # Command: 'chat' (Renamed from 'create')
     chat_parser = subparsers.add_parser("chat", help="Interact with the goal agent")
+    chat_parser.add_argument(
+        "--user-id", type=str, dest="user_id", help="The unique identifier for the user"
+    )
     chat_parser.set_defaults(func=chat_with_agent)
 
     # Command: 'track' (New)

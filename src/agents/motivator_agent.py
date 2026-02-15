@@ -115,7 +115,7 @@ def run_resilience_coach(state: PlanState):
     logger.info(
         f"Context prepared for LLM: {"\n\n".join([msg.content for msg in context])}"
     )
-    llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.1)
+    llm = ChatOpenAI(model="gpt-5-mini", temperature=0.1)
 
     try:
         response = llm.invoke(context)
