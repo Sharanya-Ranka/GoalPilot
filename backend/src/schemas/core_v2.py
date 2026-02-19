@@ -112,6 +112,9 @@ class Tracker(BaseModel):
     # --- Nested Success Logic (No Unions!) ---
     success_logic: SuccessLogic
 
+    current_value: Decimal
+    last_log_date: Optional[datetime] = None
+
     def to_db_format(self) -> Dict[str, Any]:
         """Prepares the tracker for encrypted/JSON storage."""
         # We dump the entire model but keep indexing fields separate
@@ -120,6 +123,12 @@ class Tracker(BaseModel):
             "user_id": full_dump.pop("user_id"),
             "milestone_id": full_dump.pop("milestone_id"),
             "tracker_id": full_dump.pop("tracker_id"),
+            "current_value": full_dump.pop("current_value"),
+            "last_log_date": (
+                full_dump.pop("last_log_date").isoformat()
+                if full_dump.get("last_log_date")
+                else None
+            ),
             # The remaining fields (including nested success_logic) go here
             "tracker_json": full_dump,
         }
@@ -131,6 +140,12 @@ class Tracker(BaseModel):
             user_id=data["user_id"],
             milestone_id=data["milestone_id"],
             tracker_id=data["tracker_id"],
+            current_value=data.get("current_value", 0),
+            last_log_date=(
+                datetime.fromisoformat(data["last_log_date"])
+                if data.get("last_log_date")
+                else None
+            ),
             **data["tracker_json"]
         )
 
@@ -139,7 +154,7 @@ class LogEntry(BaseModel):
     user_id: str
     tracker_id: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
-    value: float
+    value: Decimal
 
     def to_db_format(self) -> Dict[str, Any]:
         """

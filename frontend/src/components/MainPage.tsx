@@ -1,120 +1,165 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Layout, Bell, Search } from 'lucide-react';
+
+// --- Components ---
 import GoalDashboard from './GoalDashboard';
+import type { DashboardUiState } from './GoalDashboard';
 import ChatWindow from './ChatWindow';
-import type { Goal } from '../types';
+
+// --- Types ---
+import type { Goal, ChatMessage } from '../types';
+
+// --- API Layer (Hypothetical Import) ---
+// We assume these functions exist in your scripts folder
+import { 
+  fetchUserGoals, 
+  submitLogEntry, 
+  sendChatMessage 
+} from '../scripts/api_calls';
+
+// Hardcoded constants for now (could come from Auth Context later)
+const USER_ID = "user_11";
+const THREAD_ID = "thread_main_v1";
 
 export const MainPage = () => {
-  // --- State ---
+  // -------------------------------------------------------------------------
+  // 1. STATE MANAGEMENT
+  // -------------------------------------------------------------------------
+  
+  // A. Data State
   const [goals, setGoals] = useState<Goal[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [isLoadingGoals, setIsLoadingGoals] = useState(true);
 
-  // --- Mock Data Loader (Simulating API fetch) ---
-  useEffect(() => {
-    // Simulating a DB Fetch
-    const mockData: Goal[] = [
+  // B. Dashboard UI State (Preserves Open/Closed folders across refreshes)
+  const [uiState, setUiState] = useState<DashboardUiState>({
+    expandedGoals: [],
+    expandedMilestones: []
+  });
+
+  // C. Chat State
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     {
-      goal_id: "g-1",
-      what: "Run my first Half-Marathon",
-      when: "October 15, 2024",
-      why: "To prove to myself I have the discipline to stick to a long-term plan.",
-      milestones: [
-        {
-          milestone_id: "m-1",
-          statement: "Build Base Aerobic Capacity",
-          status: "completed",
-          depends_on: [],
-          trackers: [
-            {
-              tracker_id: "t-1",
-              user_id: "u-1",
-              milestone_id: "m-1",
-              metric_type: "SUM",
-              unit: "km",
-              log_prompt: "Weekly Distance",
-              target_range: [30, null],
-              cadence: "WEEKLY",
-              success_logic: { type: "STREAK", count: 4 },
-              // --- NEW FIELDS ---
-              // Sum of all logs below (32 + 35 + 31 + 34 = 132)
-              current_value: 22, 
-              logs: {
-                "2024-01-07": 2,
-                "2024-01-14": 5,
-                "2024-01-21": 1,
-                "2024-01-28": 4
-              }
-            }
-          ]
-        },
-        {
-          milestone_id: "m-2",
-          statement: "Increase Lactate Threshold",
-          status: "pending",
-          depends_on: ["m-1"],
-          trackers: [
-            {
-              tracker_id: "t-2",
-              user_id: "u-1",
-              milestone_id: "m-2",
-              metric_type: "LATEST",
-              unit: "bpm",
-              log_prompt: "Resting Heart Rate",
-              target_range: [null, 55],
-              cadence: "DAILY",
-              success_logic: { type: "ACHIEVED", count: 55 },
-              // --- NEW FIELDS ---
-              // The latest value (from 2024-02-14) is 54
-              current_value: 54,
-              logs: {
-                "2024-02-10": 62,
-                "2024-02-11": 59,
-                "2024-02-12": 58,
-                "2024-02-13": 55,
-                "2024-02-14": 54
-              }
-            },
-            {
-              tracker_id: "t-3",
-              user_id: "u-1",
-              milestone_id: "m-2",
-              metric_type: "BOOLEAN",
-              unit: "session",
-              log_prompt: "Tempo Run Completed",
-              target_range: [1, 1],
-              cadence: "WEEKLY",
-              success_logic: { type: "TOTAL_COUNT", count: 8 },
-              // --- NEW FIELDS ---
-              // Boolean: 1 means "Done", 0 means "Not Done"
-              current_value: 1,
-              logs: {
-                "2024-02-02": 1,
-                "2024-02-09": 1,
-                "2024-02-16": 0 
-              }
-            }
-          ]
-        }
-      ]
+      id: 'welcome',
+      role: 'agent',
+      content: "Hello! I'm ready to help you update your trackers.",
+      timestamp: new Date()
     }
-  ];
+  ]);
+  const [isChatLoading, setIsChatLoading] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
 
-    setTimeout(() => {
-      setGoals(mockData);
-      setLoading(false);
-    }, 800);
+  // -------------------------------------------------------------------------
+  // 2. DATA FETCHING & REFRESHING
+  // -------------------------------------------------------------------------
+
+  const loadGoals = useCallback(async () => {
+    try {
+      // API CALL: Fetch the full tree
+      const data = await fetchUserGoals(USER_ID);
+      setGoals(data);
+      
+      // OPTIONAL: On first load, if UI state is empty, expand the first goal
+      setUiState(prev => {
+        if (prev.expandedGoals.length === 0 && data.length > 0) {
+          return { ...prev, expandedGoals: [data[0].goal_id] };
+        }
+        return prev;
+      });
+    } catch (error) {
+      console.error("Failed to load goals", error);
+    } finally {
+      setIsLoadingGoals(false);
+    }
   }, []);
 
+  // Initial Load
+  useEffect(() => {
+    loadGoals();
+  }, [loadGoals]);
+
+  // -------------------------------------------------------------------------
+  // 3. HANDLERS (The "Controller" Logic)
+  // -------------------------------------------------------------------------
+
+  // --- Dashboard: Toggle Folders ---
+  const handleToggle = (type: 'goal' | 'milestone', id: string) => {
+    setUiState(prev => {
+      const listKey = type === 'goal' ? 'expandedGoals' : 'expandedMilestones';
+      const currentList = prev[listKey];
+      
+      const newList = currentList.includes(id)
+        ? currentList.filter(itemId => itemId !== id) // Close
+        : [...currentList, id];                       // Open
+
+      return { ...prev, [listKey]: newList };
+    });
+  };
+
+  // --- Dashboard: Submit Log ---
+  const handleLogSubmit = async (trackerId: string, value: number, date: string) => {
+    try {
+      // 1. API CALL: Send data to server
+      await submitLogEntry(USER_ID, trackerId, value, date);
+      
+      // 2. Refresh Data (This updates the 'goals' prop, but 'uiState' stays same)
+      await loadGoals();
+      
+      console.log("Log saved and dashboard refreshed");
+    } catch (error) {
+      console.error("Failed to log entry", error);
+      alert("Failed to save log. Please try again.");
+    }
+  };
+
+  // --- Chat: Send Message ---
+  const handleSendMessage = async (text: string) => {
+    setChatError(null);
+    setIsChatLoading(true);
+
+    // 1. Optimistic Update (Show user message immediately)
+    const newUserMsg: ChatMessage = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: text,
+      timestamp: new Date()
+    };
+    setChatMessages(prev => [...prev, newUserMsg]);
+
+    try {
+      // 2. API CALL: Send to AI
+      const response = await sendChatMessage(text, THREAD_ID);
+      
+      // 3. Update with Agent Response
+      const newAgentMsg: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        role: 'agent',
+        content: response.message, // Assuming API returns { message: "..." }
+        timestamp: new Date()
+      };
+      setChatMessages(prev => [...prev, newAgentMsg]);
+
+    } catch (err) {
+      console.error(err);
+      setChatError("Unable to reach the assistant.");
+    } finally {
+      setIsChatLoading(false);
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // 4. RENDER
+  // -------------------------------------------------------------------------
+  
   return (
     <div className="flex flex-col h-screen bg-gray-100 overflow-hidden">
       
-      {/* --- Top Navigation Bar --- */}
-      <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 flex-shrink-0 z-10">
+      {/* --- Header --- */}
+      <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 md:px-6 flex-shrink-0 z-10">
         <div className="flex items-center gap-3">
           <div className="bg-indigo-600 p-2 rounded-lg">
             <Layout className="text-white" size={20} />
           </div>
-          <span className="font-bold text-xl text-gray-800 tracking-tight">LifeSync AI</span>
+          <span className="font-bold text-xl text-gray-800 tracking-tight hidden md:inline">GoalPilot</span>
         </div>
         
         <div className="flex items-center gap-4">
@@ -130,53 +175,45 @@ export const MainPage = () => {
             <Bell size={20} />
             <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border border-white"></span>
           </button>
-          <div className="w-8 h-8 bg-indigo-100 text-indigo-700 rounded-full flex items-center justify-center font-bold text-xs border border-indigo-200">
+          <div className="w-8 h-8 bg-indigo-100 text-indigo-700 rounded-full flex items-center justify-center font-bold text-xs border border-indigo-200 cursor-pointer">
             JD
           </div>
         </div>
       </header>
 
-      {/* --- Main Content Area (Split View) --- */}
+      {/* --- Split View Content --- */}
       <div className="flex flex-1 overflow-hidden relative">
         
-        {/* LEFT COLUMN: Dashboard (Scrollable) */}
-        <main className="flex-1 overflow-y-auto scroll-smooth custom-scrollbar">
-          <div className="max-w-5xl mx-auto py-8 px-6">
-            {loading ? (
-              <div className="space-y-4 animate-pulse">
+        {/* LEFT: Dashboard (Scrollable) */}
+        <main className="flex-1 overflow-y-auto scroll-smooth custom-scrollbar bg-gray-50">
+          <div className="max-w-5xl mx-auto py-6 px-4 md:px-8">
+            {isLoadingGoals ? (
+              <div className="space-y-4 animate-pulse mt-8">
                 <div className="h-48 bg-gray-200 rounded-xl"></div>
                 <div className="h-48 bg-gray-200 rounded-xl"></div>
               </div>
             ) : (
-              <GoalDashboard goals={goals} />
+              <GoalDashboard 
+                goals={goals}
+                uiState={uiState}
+                onToggle={handleToggle}
+                onLogSubmit={handleLogSubmit}
+              />
             )}
           </div>
         </main>
 
-        {/* RIGHT COLUMN: Chat (Fixed/Sticky) */}
-        <aside className="w-[400px] border-l border-gray-200 bg-white flex flex-col shadow-xl z-20 hidden lg:flex">
-          <div className="flex-1 flex flex-col overflow-hidden">
-            {/* NOTE: I am passing a wrapper style here. 
-                Ideally, update ChatWindow to accept `className` or 
-                remove its internal hardcoded height.
-            */}
-            <div className="h-full flex flex-col">
-              <ChatWindow 
-                threadId="thread_123" 
-                initialMessages={[
-                  {
-                    id: 'welcome', 
-                    role: 'agent', 
-                    content: "Hello! I see you've completed your base training. Would you like to log your latest resting heart rate?", 
-                    timestamp: new Date()
-                  }
-                ]}
-              />
-            </div>
-          </div>
+        {/* RIGHT: Chat (Fixed) */}
+        <aside className="w-full md:w-[400px] border-l border-gray-200 bg-white flex flex-col shadow-xl z-20 hidden lg:flex">
+          <ChatWindow 
+            messages={chatMessages}
+            isLoading={isChatLoading}
+            error={chatError}
+            onSendMessage={handleSendMessage}
+          />
         </aside>
 
-        {/* Mobile Toggle for Chat (Floating Action Button) */}
+        {/* Mobile Chat FAB (Floating Action Button) */}
         <button className="lg:hidden fixed bottom-6 right-6 bg-indigo-600 text-white p-4 rounded-full shadow-lg hover:bg-indigo-700 transition-transform hover:scale-105 z-50">
           <div className="relative">
             <Layout size={24} />

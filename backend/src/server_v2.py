@@ -2,6 +2,7 @@
 import boto3
 import uvicorn
 from fastapi import FastAPI, HTTPException, Depends, APIRouter, Query
+from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
 from agents.agent_graph import build_goal_app
 from agents.agent_utils import initialize_state
@@ -24,6 +25,23 @@ from schemas.core_v2 import (
 
 # Initialize App
 app = FastAPI(title="Goal Tracker API", version="2.0")
+
+# Define the origins that are allowed to talk to your API
+# Adjust the ports depending on what your frontend uses (e.g., React is usually 3000, Vite is 5173)
+origins = [
+    "http://localhost",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://localhost:8080",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods (GET, POST, PUT, OPTIONS, etc.)
+    allow_headers=["*"],  # Allows all headers
+)
 
 
 my_session = boto3.session.Session(
@@ -63,6 +81,7 @@ def get_user_dashboard(user_id: str, db: DynamoDBHandler = Depends(get_db_handle
     try:
         return db.get_full_user_state(user_id)
     except Exception as e:
+        breakpoint()
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -149,16 +168,36 @@ def update_tracker(
 logs_router = APIRouter(prefix="/logs", tags=["Logs"])
 
 
+# @logs_router.post("/", response_model=LogEntry)
+# def log_progress(update: LogEntry, db: DynamoDBHandler = Depends(get_db_handler)):
+#     """
+#     Logs a data point.
+#     Payload: { "user_id": "...", "tracker_id": "...", "value": 10 }
+#     """
+#     try:
+#         db.log_tracker_update(update)
+#         return update
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
 @logs_router.post("/", response_model=LogEntry)
-def log_progress(update: LogEntry, db: DynamoDBHandler = Depends(get_db_handler)):
+def log_progress(entry: LogEntry, db: DynamoDBHandler = Depends(get_db_handler)):
     """
-    Logs a data point.
-    Payload: { "user_id": "...", "tracker_id": "...", "value": 10 }
+    Logs a data point and atomically updates the parent Tracker's state.
     """
     try:
-        db.log_tracker_update(update)
-        return update
+        # 1. Fetch the tracker first to know the metric_type and current rules
+        tracker = db.get_tracker(entry.user_id, entry.tracker_id)
+        if not tracker:
+            raise HTTPException(status_code=404, detail="Tracker not found")
+
+        # 2. Pass both the new entry and the tracker config to the DB handler
+        db.log_tracker_update(entry, tracker)
+
+        return entry
     except Exception as e:
+        # Log the error internally here
         raise HTTPException(status_code=500, detail=str(e))
 
 

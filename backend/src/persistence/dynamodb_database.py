@@ -1,3 +1,4 @@
+from decimal import Decimal
 import boto3
 from boto3.dynamodb.conditions import Key, Attr
 from typing import List, Dict, Optional, Any
@@ -54,22 +55,28 @@ class DynamoDBHandler:
             m_id = t["milestone_id"]
             if m_id not in trackers_by_milestone:
                 trackers_by_milestone[m_id] = []
-            trackers_by_milestone[m_id].append(t)
+            trackers_by_milestone[m_id].append(
+                Tracker.from_db_format(t).model_dump(mode="json")
+            )
 
         # 2. Index Milestones by Goal
         milestones_by_goal = {}
         for m in milestones_data:
-            m["trackers"] = trackers_by_milestone.get(m["milestone_id"], [])
+            mtemp = Milestone.from_db_format(m).model_dump(mode="json")
+            mtemp["trackers"] = trackers_by_milestone.get(m["milestone_id"], [])
             g_id = m["goal_id"]
             if g_id not in milestones_by_goal:
                 milestones_by_goal[g_id] = []
-            milestones_by_goal[g_id].append(m)
+            milestones_by_goal[g_id].append(mtemp)
 
+        goals_nested = []
         # 3. Attach to Goals
         for g in goals_data:
-            g["milestones"] = milestones_by_goal.get(g["goal_id"], [])
+            gtemp = Goal.from_db_format(g).model_dump(mode="json")
+            gtemp["milestones"] = milestones_by_goal.get(g["goal_id"], [])
+            goals_nested.append(gtemp)
 
-        return {"goals": goals_data}
+        return {"goals": goals_nested}
 
     # --- 2. Standard CRUD (Create) ---
     def create_goal(self, goal: Goal):
@@ -81,16 +88,95 @@ class DynamoDBHandler:
     def create_tracker(self, tracker: Tracker):
         self.trackers_table.put_item(Item=tracker.to_db_format())
 
-    def log_tracker_update(self, update: LogEntry):
+    def log_tracker_update(self, update: LogEntry, tracker: Tracker):
         """
-        Logs a history entry.
-        Constructs the composite sort key (tracker_id#date) for efficient querying.
+        Atomically writes the log and updates the tracker aggregation.
         """
-        item = update.to_db_format()
-        # Override SK to allow searching by tracker
-        # Item structure: user_id (PK), sk (SK), value, ...
-        item["sk"] = f"{update.tracker_id}#{update.date}"
-        self.logs_table.put_item(Item=item)
+        # TransactWriteItems requires the low-level client
+        client = self.dynamodb.meta.client
+
+        timestamp_str = update.timestamp.isoformat()
+        log_value_str = str(update.value)  # Boto3 client requires numbers as strings
+        # breakpoint()
+
+        # 1. Prepare the Put operation for the Logs table
+        # Based on your get_history_logs, PK is 'user_id' and SK is 'sk'
+        log_put = {
+            "Put": {
+                "TableName": self.logs_table.name,
+                "Item": {
+                    "user_id": update.user_id,
+                    "sk": f"{update.tracker_id}#{timestamp_str}",
+                    "timestamp": timestamp_str,
+                    "value": log_value_str,
+                    "tracker_id": update.tracker_id,
+                },
+            }
+        }
+
+        # 2. Prepare the Update operation for the Trackers table
+        tracker_key = {
+            "user_id": tracker.user_id,
+            "tracker_id": tracker.tracker_id,
+        }
+
+        update_action = {}
+
+        if tracker.metric_type == "SUM":
+            # Atomic addition (safe for concurrent requests)
+            update_action = {
+                "Update": {
+                    "TableName": self.trackers_table.name,
+                    "Key": tracker_key,
+                    "UpdateExpression": "SET current_value = current_value + :val, last_log_date = :ts",
+                    "ExpressionAttributeValues": {
+                        ":val": Decimal(
+                            log_value_str
+                        ),  # DynamoDB expects Decimal for numbers
+                        ":ts": timestamp_str,
+                    },
+                }
+            }
+        elif tracker.metric_type in ["LATEST", "BOOLEAN"]:
+            # Conditional update: Only overwrite if this log is newer
+            update_action = {
+                "Update": {
+                    "TableName": self.trackers_table.name,
+                    "Key": tracker_key,
+                    "UpdateExpression": "SET current_value = :val, last_log_date = :ts",
+                    "ConditionExpression": "attribute_not_exists(last_log_date) OR last_log_date < :ts",
+                    "ExpressionAttributeValues": {
+                        ":val": Decimal(log_value_str),
+                        ":ts": timestamp_str,
+                    },
+                }
+            }
+
+        # 3. Execute the Transaction
+        try:
+            client.transact_write_items(
+                TransactItems=[log_put, update_action]
+            )  # update_action (DEBUG: DOESN"T WORK WITH THIS)
+        except client.exceptions.TransactionCanceledException as e:
+            # Check if the transaction was canceled because of our ConditionExpression
+            # This happens if a delayed log arrives for a LATEST/BOOLEAN tracker.
+            if "ConditionalCheckFailed" in str(e):
+                # We still want to save the historical log, we just don't want it
+                # to overwrite the newer 'current_value' on the tracker.
+                # Use the high-level resource here for a simple put.
+                self.logs_table.put_item(
+                    Item={
+                        "user_id": update.user_id,
+                        "sk": f"{update.tracker_id}#{timestamp_str}",
+                        "timestamp": timestamp_str,
+                        "value": Decimal(log_value_str),  # Resource requires Decimal
+                        "tracker_id": update.tracker_id,
+                    }
+                )
+            else:
+                # Re-raise if it failed for any other reason (capacity, permissions, etc.)
+                breakpoint()
+                raise e
 
     # --- 3. Optimized Reads ---
     def _query_all_by_user(self, table, user_id: str) -> List[Dict]:
@@ -129,6 +215,16 @@ class DynamoDBHandler:
         ]
 
         return milestones
+
+    def get_tracker(self, user_id: str, tracker_id: str) -> Optional[Tracker]:
+        """Fetches a single tracker by user_id and tracker_id."""
+        response = self.trackers_table.get_item(
+            Key={"user_id": user_id, "tracker_id": tracker_id}
+        )
+        item = response.get("Item")
+        if item:
+            return Tracker.from_db_format(item)
+        return None
 
     # --- 4. Updates (Overwrite Strategy) ---
     # In DynamoDB + Pydantic, it's often safer to PUT (overwrite) the whole item

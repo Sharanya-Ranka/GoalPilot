@@ -1,6 +1,21 @@
 import boto3
 
 
+def delete_tables(table_names):
+    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+    for name in table_names:
+        try:
+            print(f"Deleting {name}...")
+            table = dynamodb.Table(name)
+            table.delete()
+            print(f"✅ {name} deleted successfully.")
+        except Exception as e:
+            if "ResourceNotFoundException" in str(e):
+                print(f"⚠️  {name} does not exist.")
+            else:
+                print(f"❌ Error deleting {name}: {e}")
+
+
 def create_tables():
     # Make sure this matches the region in your server.py
     dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
@@ -56,12 +71,12 @@ def create_tables():
         {
             "TableName": "my_graph_checkpoints",
             "KeySchema": [
-                {"AttributeName": "thread_id", "KeyType": "HASH"},  # Partition Key
-                {"AttributeName": "checkpoint_id", "KeyType": "RANGE"},  # Sort Key
+                {"AttributeName": "PK", "KeyType": "HASH"},  # Partition Key
+                {"AttributeName": "SK", "KeyType": "RANGE"},  # Sort Key
             ],
             "AttributeDefinitions": [
-                {"AttributeName": "thread_id", "AttributeType": "S"},
-                {"AttributeName": "checkpoint_id", "AttributeType": "S"},
+                {"AttributeName": "PK", "AttributeType": "S"},
+                {"AttributeName": "SK", "AttributeType": "S"},
             ],
         },
     ]
@@ -85,4 +100,5 @@ def create_tables():
 
 
 if __name__ == "__main__":
+    # delete_tables(["Goals", "Milestones", "Trackers", "Logs", "my_graph_checkpoints"])
     create_tables()

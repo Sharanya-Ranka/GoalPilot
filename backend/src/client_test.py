@@ -1,6 +1,6 @@
 import requests
 from datetime import datetime
-from src.schemas.core_v2 import (
+from schemas.core_v2 import (
     Goal,
     Milestone,
     Tracker,
@@ -15,7 +15,7 @@ SERVER_URL = "http://127.0.0.1:8000"
 def run_create_test():
     print("--- 1. CREATING A GOAL ---")
     # We generate the ID locally using the Schema, so we know it immediately.
-    user_id = "user_10"
+    user_id = "user_11"
     my_goal = Goal(
         user_id=user_id,
         what="TestGoal",
@@ -24,9 +24,9 @@ def run_create_test():
     )
 
     # Send to Server
-    resp = requests.post(f"{SERVER_URL}/goals", json=my_goal.model_dump())
+    resp = requests.post(f"{SERVER_URL}/goals/", json=my_goal.model_dump())
     if resp.status_code == 200:
-        print(f"✅ Goal Created! ID: {my_goal.id}")
+        print(f"✅ Goal Created! ID: {my_goal.goal_id}")
     else:
         print(f"❌ Error: {resp.text}")
         return
@@ -65,13 +65,13 @@ def run_create_test():
 
     # Send to Server
     resp1 = requests.post(
-        f"{SERVER_URL}/milestones",
-        json=ms1.model_dump(),
+        f"{SERVER_URL}/milestones/",
+        json=ms1.model_dump(mode="json"),
     )
 
     resp2 = requests.post(
-        f"{SERVER_URL}/milestones",
-        json=ms2.model_dump(),
+        f"{SERVER_URL}/milestones/",
+        json=ms2.model_dump(mode="json"),
     )
 
     t1 = Tracker(
@@ -84,6 +84,7 @@ def run_create_test():
         cadence="DAILY",
         window_days=10,
         current_value=0,
+        last_log_date=datetime(2026, 1, 1),
         success_logic=SuccessLogic(type="TOTAL_COUNT", count=10),
     )
 
@@ -97,6 +98,7 @@ def run_create_test():
         cadence="DAILY",
         window_days=10,
         current_value=50,
+        last_log_date=datetime(2026, 1, 1),
         success_logic=SuccessLogic(type="STREAK", count=10),
     )
 
@@ -110,41 +112,53 @@ def run_create_test():
         cadence="DAILY",
         window_days=10,
         current_value=0,
+        last_log_date=datetime(2026, 1, 1),
         success_logic=SuccessLogic(type="ACHIEVED", count=10),
     )
 
     resp1 = requests.post(
-        f"{SERVER_URL}/trackers",
-        json=t1.model_dump(),
+        f"{SERVER_URL}/trackers/",
+        json=t1.model_dump(mode="json"),
     )
+    if resp1.status_code == 200:
+        print(f"✅ Tracker 1 Created! ID: {t1.tracker_id}")
+    else:
+        print(f"❌ Error: {resp1.text}")
+        return
 
     resp2 = requests.post(
-        f"{SERVER_URL}/trackers",
-        json=t2.model_dump(),
+        f"{SERVER_URL}/trackers/",
+        json=t2.model_dump(mode="json"),
     )
 
     resp3 = requests.post(
-        f"{SERVER_URL}/trackers",
-        json=t3.model_dump(),
+        f"{SERVER_URL}/trackers/",
+        json=t3.model_dump(mode="json"),
     )
 
     t1_logs = [("2026-01-02", 5), ("2026-01-05", 4), ("2026-01-08", 10)]
     t2_logs = [("2026-01-02", 56), ("2026-01-05", 54), ("2026-01-08", 60)]
     t3_logs = [("2026-01-02", 0), ("2026-01-05", 0), ("2026-01-08", 1)]
 
-    for tracker, tracker_logs in zip([t1, t2, t3], [t1_logs, t2_logs, t3_logs]):
+    for tracker, tracker_logs in zip([t2, t1, t3], [t2_logs, t1_logs, t3_logs]):
         for dt_str, value in tracker_logs:
             tu = LogEntry(
                 user_id=user_id,
                 tracker_id=tracker.tracker_id,
-                timestamp=datetime.strptime(dt_str),
+                timestamp=datetime.strptime(dt_str, "%Y-%m-%d"),
                 value=value,
             )
 
             resp = requests.post(
-                f"{SERVER_URL}/logs",
-                json=tu.model_dump(),
+                f"{SERVER_URL}/logs/",
+                json=tu.model_dump(mode="json"),
             )
+
+            if resp.status_code == 200:
+                print(f"Log Created! ID: {tu.tracker_id}")
+            else:
+                print(f"❌ Error: {resp.text}")
+                return
 
 
 if __name__ == "__main__":

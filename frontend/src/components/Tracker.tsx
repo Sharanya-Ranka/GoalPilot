@@ -123,6 +123,15 @@ export const TrackerItem: React.FC<TrackerProps> = ({ tracker, onLogSubmit }) =>
   };
 
   // Sort logs for history list (Newest first)
+  tracker.logs = {
+  "2026-01-01": 150,
+  "2026-01-02": 210,
+  "2026-01-03": 185,
+  "2026-01-04": 320,
+  "2026-01-05": 275,
+  "2026-01-06": 190,
+  "2026-01-07": 415
+};
   const history = Object.entries(tracker.logs)
     .sort((a, b) => new Date(b[0]).getTime() - new Date(a[0]).getTime())
     .slice(0, 3); // Top 3

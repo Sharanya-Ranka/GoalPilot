@@ -2,30 +2,24 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, User, Bot, Loader2, AlertCircle } from 'lucide-react';
 import type { ChatMessage } from '../types';
 
-
 interface ChatWindowProps {
-  threadId: string;
-  serverUrl?: string; // Optional: defaults to localhost if not provided
-  initialMessages?: ChatMessage[];
+  messages: ChatMessage[];
+  isLoading: boolean;
+  error: string | null;
+  onSendMessage: (message: string) => void; // The communication channel to the parent
 }
 
-// --- Helper: Message Bubble Component ---
-
+// --- Helper: Message Bubble (Unchanged) ---
 const MessageBubble = ({ message }: { message: ChatMessage }) => {
   const isUser = message.role === 'user';
-  
   return (
     <div className={`flex w-full mb-4 ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div className={`flex max-w-[80%] md:max-w-[70%] ${isUser ? 'flex-row-reverse' : 'flex-row'} items-end gap-2`}>
-        
-        {/* Avatar */}
         <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
           isUser ? 'bg-indigo-600 text-white' : 'bg-emerald-600 text-white'
         }`}>
           {isUser ? <User size={16} /> : <Bot size={16} />}
         </div>
-
-        {/* Bubble */}
         <div className={`p-3 rounded-2xl shadow-sm text-sm ${
           isUser 
             ? 'bg-indigo-600 text-white rounded-br-none' 
@@ -42,92 +36,44 @@ const MessageBubble = ({ message }: { message: ChatMessage }) => {
 };
 
 // --- Main Component ---
-
 export const ChatWindow: React.FC<ChatWindowProps> = ({ 
-  threadId, 
-  serverUrl = "http://localhost:8000",
-  initialMessages = []
+  messages, 
+  isLoading, 
+  error, 
+  onSendMessage 
 }) => {
-  const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
+  // We keep inputValue local because the Parent doesn't need to know 
+  // every single character the user types, only the final submitted message.
   const [inputValue, setInputValue] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  
-  // Auto-scroll ref
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
+  // Auto-scroll whenever the "messages" prop changes
   useEffect(() => {
-    scrollToBottom();
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
 
-  const handleSendMessage = async () => {
+  const handleSubmit = () => {
     if (!inputValue.trim() || isLoading) return;
-
-    const currentInput = inputValue;
-    setInputValue(""); // Clear input immediately
-    setError(null);
-
-    // 1. Optimistic Update: Add user message to UI
-    const userMsg: ChatMessage = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: currentInput,
-      timestamp: new Date()
-    };
-    setMessages(prev => [...prev, userMsg]);
-    setIsLoading(true);
-
-    try {
-      // 2. Network Request
-      const response = await fetch(`${serverUrl}/ai/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: currentInput,
-          thread_id: threadId
-        })
-      });
-
-      if (!response.ok) throw new Error("Failed to send message");
-
-      const data = await response.json();
-
-      // 3. Add Agent Response (Assuming API returns { response: "text" })
-      const agentMsg: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        role: 'agent',
-        content: data.response || "I received your message but have no content to display.", 
-        timestamp: new Date()
-      };
-      
-      setMessages(prev => [...prev, agentMsg]);
-
-    } catch (err) {
-      console.error("Chat Error:", err);
-      setError("Failed to reach the agent. Please try again.");
-      // Optional: Restore input if failed? 
-      // setInputValue(currentInput); 
-    } finally {
-      setIsLoading(false);
-    }
+    
+    // Pass the data up to the parent
+    onSendMessage(inputValue);
+    
+    // Clear local input
+    setInputValue(""); 
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSendMessage();
+      handleSubmit();
     }
   };
 
   return (
-    <div className="flex flex-col h-full w-full mx-auto bg-gray-50 border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+    <div className="flex flex-col h-full w-full bg-gray-50 border-l border-gray-200 shadow-xl overflow-hidden">
       
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 p-4 flex items-center justify-between">
+      <div className="bg-white border-b border-gray-200 p-4 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-600">
             <Bot size={24} />
@@ -144,7 +90,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.length === 10 && (
+        {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-gray-400 text-sm">
             <Bot size={48} className="mb-2 opacity-20" />
             <p>No messages yet. Start the conversation!</p>
@@ -187,7 +133,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       </div>
 
       {/* Input Area */}
-      <div className="bg-white border-t border-gray-200 p-4">
+      <div className="bg-white border-t border-gray-200 p-4 shrink-0">
         <div className="flex gap-2">
           <input
             type="text"
@@ -199,7 +145,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             disabled={isLoading}
           />
           <button
-            onClick={handleSendMessage}
+            onClick={handleSubmit}
             disabled={isLoading || !inputValue.trim()}
             className={`px-4 rounded-lg flex items-center justify-center transition-all ${
               isLoading || !inputValue.trim()
