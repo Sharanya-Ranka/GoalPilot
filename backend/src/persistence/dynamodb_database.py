@@ -49,6 +49,7 @@ class DynamoDBHandler:
 
         # 1. Index Trackers by Milestone
         trackers_by_milestone = {}
+        # breakpoint()
         for t in trackers_data:
             # Reconstruct Pydantic to ensure clean data, then dump back or keep as dict
             # t_obj = Tracker.from_db_format(t)

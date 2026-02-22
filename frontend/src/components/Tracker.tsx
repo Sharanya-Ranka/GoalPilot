@@ -106,11 +106,11 @@ export const TrackerItem: React.FC<TrackerProps> = ({ tracker, onLogSubmit }) =>
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async () => {
-    if (!logValue && tracker.metric_type !== 'BOOLEAN') return;
+    if (!logValue && tracker.aggregation_strategy !== 'ONE-TIME') return;
     
     setIsSubmitting(true);
     // For Boolean, the button click implies value 1 (True)
-    const val = tracker.metric_type === 'BOOLEAN' ? 1 : parseFloat(logValue);
+    const val = tracker.aggregation_strategy === 'ONE-TIME' ? 1 : parseFloat(logValue);
     
     try {
       await onLogSubmit(tracker.tracker_id, val, logDate);
@@ -144,7 +144,7 @@ export const TrackerItem: React.FC<TrackerProps> = ({ tracker, onLogSubmit }) =>
         <h4 className="text-sm font-semibold text-gray-700 mb-2 w-full text-center">{tracker.log_prompt}</h4>
         
         <div className="h-24 w-full flex items-center justify-center">
-          {tracker.metric_type === 'SUM' && (
+          {tracker.aggregation_strategy === 'SUM' && (
             <BatteryDisplay 
               current={tracker.current_value} 
               target={tracker.target_range[1] || tracker.target_range[0]} 
@@ -152,11 +152,11 @@ export const TrackerItem: React.FC<TrackerProps> = ({ tracker, onLogSubmit }) =>
             />
           )}
           
-          {tracker.metric_type === 'LATEST' && (
+          {tracker.aggregation_strategy !== "SUM" && tracker.aggregation_strategy !== "ONE-TIME" && (
             <MiniGraph logs={tracker.logs} targetRange={tracker.target_range} />
           )}
 
-          {tracker.metric_type === 'BOOLEAN' && (
+          {tracker.aggregation_strategy === 'ONE-TIME' && (
              <div className={`w-16 h-16 rounded-full flex items-center justify-center ${
                tracker.current_value === 1 ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-300'
              }`}>
@@ -180,7 +180,7 @@ export const TrackerItem: React.FC<TrackerProps> = ({ tracker, onLogSubmit }) =>
               className="w-1/3 text-xs border border-gray-300 rounded px-2 py-1"
             />
             
-            {tracker.metric_type === 'BOOLEAN' ? (
+            {tracker.aggregation_strategy === 'ONE-TIME' ? (
               <button 
                 onClick={handleSubmit}
                 disabled={isSubmitting}

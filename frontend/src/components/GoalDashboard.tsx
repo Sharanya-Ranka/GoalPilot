@@ -50,7 +50,7 @@ interface MilestoneItemProps {
 }
 
 const MilestoneItem = ({ milestone, isOpen, onToggle, onLogSubmit }: MilestoneItemProps) => {
-  console.log(JSON.stringify(milestone))
+  // console.log(JSON.stringify(milestone))
   return (
     <div className="border-l-2 border-indigo-200 pl-4 ml-2 pb-6 last:pb-0">
       <div 

@@ -7,7 +7,7 @@ import type { DashboardUiState } from './GoalDashboard';
 import ChatWindow from './ChatWindow';
 
 // --- Types ---
-import type { Goal, ChatMessage } from '../types';
+import type { Goal, ChatMessage, } from '../types';
 
 // --- API Layer (Hypothetical Import) ---
 // We assume these functions exist in your scripts folder
@@ -18,8 +18,8 @@ import {
 } from '../scripts/api_calls';
 
 // Hardcoded constants for now (could come from Auth Context later)
-const USER_ID = "user_11";
-const THREAD_ID = "thread_main_v1";
+const USER_ID = "user_14";
+const THREAD_ID = USER_ID;
 
 export const MainPage = () => {
   // -------------------------------------------------------------------------
@@ -130,13 +130,15 @@ export const MainPage = () => {
       const response = await sendChatMessage(text, THREAD_ID);
       
       // 3. Update with Agent Response
-      const newAgentMsg: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        role: 'agent',
-        content: response.message, // Assuming API returns { message: "..." }
+      const newAgentMsgs: ChatMessage[] = response.responses.map(({agent, message}, index) => ({
+        // Adding index to Date.now() ensures unique IDs even if generated in the same millisecond
+        id: (Date.now() + index + 1).toString(), 
+        role: agent, 
+        content: message,
         timestamp: new Date()
-      };
-      setChatMessages(prev => [...prev, newAgentMsg]);
+      }));
+      console.log(newAgentMsgs)
+      setChatMessages(prev => [...prev, ...newAgentMsgs]);
 
     } catch (err) {
       console.error(err);
@@ -185,7 +187,7 @@ export const MainPage = () => {
       <div className="flex flex-1 overflow-hidden relative">
         
         {/* LEFT: Dashboard (Scrollable) */}
-        <main className="flex-1 overflow-y-auto scroll-smooth custom-scrollbar bg-gray-50">
+        <main className="flex overflow-y-auto scroll-smooth custom-scrollbar bg-gray-50">
           <div className="max-w-5xl mx-auto py-6 px-4 md:px-8">
             {isLoadingGoals ? (
               <div className="space-y-4 animate-pulse mt-8">
@@ -204,7 +206,7 @@ export const MainPage = () => {
         </main>
 
         {/* RIGHT: Chat (Fixed) */}
-        <aside className="w-full md:w-[400px] border-l border-gray-200 bg-white flex flex-col shadow-xl z-20 hidden lg:flex">
+        <aside className="w-full md:w-[400px] border-l border-gray-200 bg-white flex-1 flex-col shadow-xl z-20"> {/* hidden lg:flex">*/}
           <ChatWindow 
             messages={chatMessages}
             isLoading={isChatLoading}

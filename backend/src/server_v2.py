@@ -50,7 +50,7 @@ my_session = boto3.session.Session(
 
 # Initialize the saver (make sure you've created the table first or set logic to create it)
 checkpointer = DynamoDBSaver(
-    table_name="my_graph_checkpoints1",
+    table_name="my_graph_checkpoints",
     region_name="us-east-1",
     enable_checkpoint_compression=True,
     session=my_session,

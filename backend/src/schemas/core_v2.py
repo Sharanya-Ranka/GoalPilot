@@ -92,6 +92,14 @@ class SuccessLogic(BaseModel):
     count: int
 
 
+# "log_prompt": string,
+#           "unit": string,
+#           "aggregation_strategy": "SUM" | "ALL" | "MIN" | "MAX" | "MEAN" | "ONE-TIME",
+#           "target_range": [number | null, number | null],
+#           "window_num_days": number | null,
+#           "num_windows_to_completion": number | null,
+
+
 class Tracker(BaseModel):
     # --- Indexing & Linkage ---
     user_id: str
@@ -99,36 +107,30 @@ class Tracker(BaseModel):
     tracker_id: str = Field(default_factory=generate_id)
 
     # --- Metric Configuration ---
-    metric_type: Literal["SUM", "LATEST", "BOOLEAN"]
-    unit: str
     log_prompt: str
-
+    unit: str
+    aggregation_strategy: Literal["SUM", "ALL", "MIN", "MAX", "MEAN", "ONE-TIME"]
     # [min, max] -> Use None/null for open bounds
     target_range: Tuple[Optional[Decimal], Optional[Decimal]]
 
-    cadence: Literal["DAILY", "WEEKLY", "MONTHLY", "ONCE"]
-    window_days: Optional[int] = None
+    window_num_days: Optional[int] = None
+    num_windows_to_completion: Optional[int] = None
 
-    # --- Nested Success Logic (No Unions!) ---
-    success_logic: SuccessLogic
-
-    current_value: Decimal
+    # --- Tracking State ---
+    current_value: Decimal = 0
     last_log_date: Optional[datetime] = None
 
     def to_db_format(self) -> Dict[str, Any]:
         """Prepares the tracker for encrypted/JSON storage."""
         # We dump the entire model but keep indexing fields separate
         full_dump = self.model_dump()
+        last_log_date = full_dump.pop("last_log_date", None)
         return {
             "user_id": full_dump.pop("user_id"),
             "milestone_id": full_dump.pop("milestone_id"),
             "tracker_id": full_dump.pop("tracker_id"),
             "current_value": full_dump.pop("current_value"),
-            "last_log_date": (
-                full_dump.pop("last_log_date").isoformat()
-                if full_dump.get("last_log_date")
-                else None
-            ),
+            "last_log_date": (last_log_date.isoformat() if last_log_date else None),
             # The remaining fields (including nested success_logic) go here
             "tracker_json": full_dump,
         }
@@ -136,7 +138,9 @@ class Tracker(BaseModel):
     @classmethod
     def from_db_format(cls, data: Dict[str, Any]) -> "Tracker":
         """Reconstructs the tracker from a DB record."""
-        return cls(
+        # breakpoint()
+
+        data_dict = dict(
             user_id=data["user_id"],
             milestone_id=data["milestone_id"],
             tracker_id=data["tracker_id"],
@@ -146,8 +150,9 @@ class Tracker(BaseModel):
                 if data.get("last_log_date")
                 else None
             ),
-            **data["tracker_json"]
         )
+        data_dict.update(data.get("tracker_json", {}))
+        return cls(**data_dict)
 
 
 class LogEntry(BaseModel):
