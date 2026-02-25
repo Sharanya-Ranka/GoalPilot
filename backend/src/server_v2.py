@@ -81,7 +81,7 @@ def get_user_dashboard(user_id: str, db: DynamoDBHandler = Depends(get_db_handle
     try:
         return db.get_full_user_state(user_id)
     except Exception as e:
-        breakpoint()
+        # breakpoint()
         raise HTTPException(status_code=500, detail=str(e))
 
 

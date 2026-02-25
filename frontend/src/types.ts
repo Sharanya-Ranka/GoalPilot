@@ -17,8 +17,10 @@ export interface Tracker {
   target_range: [number | null, number | null];
   window_num_days?: number | null;
   num_windows_to_completion?: number | null;
+  window_start_date?: string|null;
 
   current_value: number; 
+  last_log_date?: string | null; 
   logs: Record<string, number>; // { "2024-01-20": 15, "2024-01-21": 10 }
 }
 

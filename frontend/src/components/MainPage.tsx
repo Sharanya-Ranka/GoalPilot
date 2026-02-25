@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Layout, Bell, Search } from 'lucide-react';
+import { Layout, Bell, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 
 // --- Components ---
 import GoalDashboard from './GoalDashboard';
@@ -14,7 +14,8 @@ import type { Goal, ChatMessage, } from '../types';
 import { 
   fetchUserGoals, 
   submitLogEntry, 
-  sendChatMessage 
+  sendChatMessage,
+  updateItem
 } from '../scripts/api_calls';
 
 // Hardcoded constants for now (could come from Auth Context later)
@@ -46,6 +47,7 @@ export const MainPage = () => {
     }
   ]);
   const [isChatLoading, setIsChatLoading] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(true);
   const [chatError, setChatError] = useState<string | null>(null);
 
   // -------------------------------------------------------------------------
@@ -95,6 +97,21 @@ export const MainPage = () => {
     });
   };
 
+  const handleItemUpdate = async (type: 'goal'| 'milestone' | 'tracker', id: string, payload: any) => {
+    try {
+      // 1. API CALL: Send the ID and payload to the backend
+      await updateItem(type, id, payload);
+      
+      // 2. Refresh Data (re-fetches the tree so the UI reflects the updated state)
+      await loadGoals();
+      
+      console.log(`${type} successfully updated.`);
+    } catch (error) {
+      console.error(`Failed to update ${type}:`, error);
+      alert(`Failed to update the ${type}. Please try again.`);
+    }
+  };
+
   // --- Dashboard: Submit Log ---
   const handleLogSubmit = async (trackerId: string, value: number, date: string) => {
     try {
@@ -110,6 +127,7 @@ export const MainPage = () => {
       alert("Failed to save log. Please try again.");
     }
   };
+
 
   // --- Chat: Send Message ---
   const handleSendMessage = async (text: string) => {
@@ -187,8 +205,8 @@ export const MainPage = () => {
       <div className="flex flex-1 overflow-hidden relative">
         
         {/* LEFT: Dashboard (Scrollable) */}
-        <main className="flex overflow-y-auto scroll-smooth custom-scrollbar bg-gray-50">
-          <div className="max-w-5xl mx-auto py-6 px-4 md:px-8">
+        <main className="flex flex-1 overflow-y-auto scroll-smooth custom-scrollbar bg-gray-50">
+          <div className="w-full mx-auto py-6 px-1 md:px-8">
             {isLoadingGoals ? (
               <div className="space-y-4 animate-pulse mt-8">
                 <div className="h-48 bg-gray-200 rounded-xl"></div>
@@ -200,20 +218,38 @@ export const MainPage = () => {
                 uiState={uiState}
                 onToggle={handleToggle}
                 onLogSubmit={handleLogSubmit}
+                onItemUpdate={handleItemUpdate}
               />
             )}
           </div>
         </main>
 
-        {/* RIGHT: Chat (Fixed) */}
-        <aside className="w-full md:w-[400px] border-l border-gray-200 bg-white flex-1 flex-col shadow-xl z-20"> {/* hidden lg:flex">*/}
-          <ChatWindow 
-            messages={chatMessages}
-            isLoading={isChatLoading}
-            error={chatError}
-            onSendMessage={handleSendMessage}
-          />
-        </aside>
+        {/* RIGHT: Chat Container with Flap */}
+        <div 
+          className={`relative hidden md:flex transition-all duration-300 ease-in-out ${
+            isChatOpen ? 'w-[400px]' : 'w-0'
+          }`}
+        >
+          {/* The Flap Toggle Button */}
+          <button
+            onClick={() => setIsChatOpen(!isChatOpen)}
+            className="absolute -left-6 top-1/2 -translate-y-1/2 w-6 h-16 bg-white border-y border-l border-gray-200 shadow-[-3px_0_5px_-2px_rgba(0,0,0,0.1)] rounded-l-lg flex items-center justify-center z-30 text-gray-500 hover:text-indigo-600 hover:bg-gray-50 transition-colors"
+            title={isChatOpen ? "Hide Chat" : "Show Chat"}
+          >
+            {isChatOpen ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+          </button>
+
+          {/* The Chat Content */}
+          {/* min-w-[400px] prevents the content from squishing during animation */}
+          <aside className="flex-1 w-full min-w-[400px] border-l border-gray-200 bg-white flex flex-col shadow-xl z-20 overflow-hidden">
+            <ChatWindow 
+              messages={chatMessages}
+              isLoading={isChatLoading}
+              error={chatError}
+              onSendMessage={handleSendMessage}
+            />
+          </aside>
+        </div>
 
         {/* Mobile Chat FAB (Floating Action Button) */}
         <button className="lg:hidden fixed bottom-6 right-6 bg-indigo-600 text-white p-4 rounded-full shadow-lg hover:bg-indigo-700 transition-transform hover:scale-105 z-50">

@@ -8,7 +8,10 @@ const ENDPOINTS = {
   GET_USER_STATE: (userId: string) => `${API_BASE_URL}/dashboard/${userId}`,
   LOG_ENTRY: `${API_BASE_URL}/logs`,
   CHAT: `${API_BASE_URL}/ai/chat`,
-  GET_CHAT_HISTORY: (userId: string) => `${API_BASE_URL}/ai/chat/${userId}`
+  GET_CHAT_HISTORY: (userId: string) => `${API_BASE_URL}/ai/chat/${userId}`,
+  GOALS_BASE: `${API_BASE_URL}/goals`,
+  MILESTONES_BASE: `${API_BASE_URL}/milestones`,
+  TRACKERS_BASE: `${API_BASE_URL}/trackers`,
 };
 
 // const DUMMY_RESPONSE = {ok:true, statusText:"Allgood"};
@@ -71,6 +74,55 @@ export const submitLogEntry = async (
     return;
   } catch (error) {
     console.error("API Call Failed: submitLogEntry", error);
+    throw error;
+  }
+};
+
+/**
+ * Updates a specific goal, milestone, or tracker.
+ */
+export const updateItem = async (
+  type: 'goal' | 'milestone' | 'tracker',
+  id: string,
+  payload: any
+): Promise<any> => {
+  try {
+    let baseUrl = '';
+    
+    // 1. Determine the correct endpoint based on the type
+    switch (type) {
+      case 'goal':
+        baseUrl = ENDPOINTS.GOALS_BASE;
+        break;
+      case 'milestone':
+        baseUrl = ENDPOINTS.MILESTONES_BASE;
+        break;
+      case 'tracker':
+        baseUrl = ENDPOINTS.TRACKERS_BASE;
+        break;
+      default:
+        throw new Error(`Invalid item type: ${type}`);
+    }
+
+    const url = `${baseUrl}/${id}`;
+
+    // 2. Send the PUT request
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Error updating ${type}: ${response.statusText}`);
+    }
+
+    // 3. Return the updated data (or a success confirmation)
+    return await response.json();
+  } catch (error) {
+    console.error(`API Call Failed: updateItem (${type})`, error);
     throw error;
   }
 };
