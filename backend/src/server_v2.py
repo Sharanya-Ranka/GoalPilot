@@ -168,37 +168,37 @@ def update_tracker(
 logs_router = APIRouter(prefix="/logs", tags=["Logs"])
 
 
-# @logs_router.post("/", response_model=LogEntry)
-# def log_progress(update: LogEntry, db: DynamoDBHandler = Depends(get_db_handler)):
-#     """
-#     Logs a data point.
-#     Payload: { "user_id": "...", "tracker_id": "...", "value": 10 }
-#     """
-#     try:
-#         db.log_tracker_update(update)
-#         return update
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
 @logs_router.post("/", response_model=LogEntry)
-def log_progress(entry: LogEntry, db: DynamoDBHandler = Depends(get_db_handler)):
+def log_progress(update: LogEntry, db: DynamoDBHandler = Depends(get_db_handler)):
     """
-    Logs a data point and atomically updates the parent Tracker's state.
+    Logs a data point.
+    Payload: { "user_id": "...", "tracker_id": "...", "value": 10 }
     """
     try:
-        # 1. Fetch the tracker first to know the metric_type and current rules
-        tracker = db.get_tracker(entry.user_id, entry.tracker_id)
-        if not tracker:
-            raise HTTPException(status_code=404, detail="Tracker not found")
-
-        # 2. Pass both the new entry and the tracker config to the DB handler
-        db.log_tracker_update(entry, tracker)
-
-        return entry
+        db.log_tracker_update(update)
+        return update
     except Exception as e:
-        # Log the error internally here
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# @logs_router.post("/", response_model=LogEntry)
+# def log_progress(entry: LogEntry, db: DynamoDBHandler = Depends(get_db_handler)):
+#     """
+#     Logs a data point and atomically updates the parent Tracker's state.
+#     """
+#     try:
+#         # 1. Fetch the tracker first to know the metric_type and current rules
+#         tracker = db.get_tracker(entry.user_id, entry.tracker_id)
+#         if not tracker:
+#             raise HTTPException(status_code=404, detail="Tracker not found")
+
+#         # 2. Pass both the new entry and the tracker config to the DB handler
+#         db.log_tracker_update(entry, tracker)
+
+#         return entry
+#     except Exception as e:
+#         # Log the error internally here
+#         raise HTTPException(status_code=500, detail=str(e))
 
 
 @logs_router.get("/")

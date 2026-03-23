@@ -1,4 +1,5 @@
 # schemas.py
+import json
 from typing import List, Dict, Any, Optional, Literal, Union, Tuple
 from pydantic import BaseModel, Field
 from typing_extensions import Annotated
@@ -120,6 +121,8 @@ class Tracker(BaseModel):
     current_value: Decimal = 0
     last_log_date: Optional[datetime] = None
 
+    logs: List[Dict[str, Any]] = Field(default_factory=list)
+
     def to_db_format(self) -> Dict[str, Any]:
         """Prepares the tracker for encrypted/JSON storage."""
         # We dump the entire model but keep indexing fields separate
@@ -131,6 +134,7 @@ class Tracker(BaseModel):
             "tracker_id": full_dump.pop("tracker_id"),
             "current_value": full_dump.pop("current_value"),
             "last_log_date": (last_log_date.isoformat() if last_log_date else None),
+            "logs": str(full_dump.pop("logs", [])),
             # The remaining fields (including nested success_logic) go here
             "tracker_json": full_dump,
         }
@@ -150,6 +154,7 @@ class Tracker(BaseModel):
                 if data.get("last_log_date")
                 else None
             ),
+            logs=json.loads((data.get("logs", "[]"))),  # Convert string back to list
         )
         data_dict.update(data.get("tracker_json", {}))
         return cls(**data_dict)

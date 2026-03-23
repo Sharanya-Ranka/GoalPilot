@@ -14,7 +14,7 @@ class DynamoDBHandler:
         self.goals_table = self.dynamodb.Table("Goals")
         self.milestones_table = self.dynamodb.Table("Milestones")
         self.trackers_table = self.dynamodb.Table("Trackers")
-        self.logs_table = self.dynamodb.Table("Logs")
+        # self.logs_table = self.dynamodb.Table("Logs")
 
     # --- 1. The "Super Read" (Optimized for Frontend) ---
     def get_full_user_state(self, user_id: str) -> Dict[str, Any]:
@@ -89,7 +89,48 @@ class DynamoDBHandler:
     def create_tracker(self, tracker: Tracker):
         self.trackers_table.put_item(Item=tracker.to_db_format())
 
-    def log_tracker_update(self, update: LogEntry, tracker: Tracker):
+    def log_tracker_update(self, update: LogEntry):
+        """
+        Reads the tracker, modifies (adds) the log, updates the aggregated value,
+        and writes the entire tracker back to DynamoDB.
+
+        Unsafe for concurrent updates to the same tracker, but simpler to implement and debug.
+        """
+        # 1. Read the tracker
+        tracker = self.get_tracker(update.user_id, update.tracker_id)
+        if not tracker:
+            raise ValueError(
+                f"Tracker {update.tracker_id} not found for user {update.user_id}"
+            )
+
+        timestamp_str = update.timestamp.isoformat()
+        log_value_str = str(update.value)
+        log_value_dec = Decimal(log_value_str)
+
+        # 2. Modify (add) the log
+        # Ensure the logs list exists on the tracker object
+        if not hasattr(tracker, "logs") or tracker.logs is None:
+            tracker.logs = []
+
+        tracker.logs.append({"date": timestamp_str, "value": log_value_str})
+
+        # 3. Update the tracker's top-level aggregation values
+        if tracker.metric_type == "SUM":
+            tracker.current_value = (
+                tracker.current_value or Decimal("0")
+            ) + log_value_dec
+            tracker.last_log_date = timestamp_str
+
+        elif tracker.metric_type in ["LATEST", "BOOLEAN"]:
+            # Conditional update: Only overwrite if this log is newer
+            if not tracker.last_log_date or timestamp_str > tracker.last_log_date:
+                tracker.current_value = log_value_dec
+                tracker.last_log_date = timestamp_str
+
+        # 4. Write it back
+        self.update_tracker(tracker)
+
+    def log_tracker_update_vm1(self, update: LogEntry, tracker: Tracker):
         """
         Atomically writes the log and updates the tracker aggregation.
         """
@@ -185,20 +226,25 @@ class DynamoDBHandler:
         response = table.query(KeyConditionExpression=Key("user_id").eq(user_id))
         return response.get("Items", [])
 
-    def get_history_logs(self, user_id: str, tracker_id: str, limit: int = 30):
+    def get_history_logs(
+        self, user_id: str, tracker_id: str, limit: int = 30
+    ) -> List[Dict[str, str]]:
         """
-        Fetches logs specifically for ONE tracker.
-        Uses the Composite Key trick: SK starts with "tracker_id#"
+        Fetches logs specifically for ONE tracker directly from the embedded logs array.
+        Returns them newest first, up to the limit.
         """
-        response = self.logs_table.query(
-            KeyConditionExpression=Key("user_id").eq(user_id)
-            & Key("sk").begins_with(f"{tracker_id}#"),
-            ScanIndexForward=False,  # Newest first
-            Limit=limit,
+        tracker = self.get_tracker(user_id, tracker_id)
+
+        # Check if tracker exists and has logs
+        if not tracker or not hasattr(tracker, "logs") or not tracker.logs:
+            return []
+
+        # Sort logs by date descending (newest first) to mimic ScanIndexForward=False
+        sorted_logs = sorted(
+            tracker.logs, key=lambda x: x.get("date", ""), reverse=True
         )
-        # Clean up the 'sk' leakage before returning if desired
-        items = response.get("Items", [])
-        return items
+
+        return sorted_logs[:limit]
 
     def get_goals_for_user(self, user_id: str) -> List[Goal]:
         """Fetches all goals for a user and parses them into Goal Pydantic models."""
