@@ -175,6 +175,7 @@ def log_progress(update: LogEntry, db: DynamoDBHandler = Depends(get_db_handler)
     Payload: { "user_id": "...", "tracker_id": "...", "value": 10 }
     """
     try:
+        # breakpoint()
         db.log_tracker_update(update)
         return update
     except Exception as e:

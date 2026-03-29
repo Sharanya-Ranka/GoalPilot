@@ -19,7 +19,7 @@ import {
 } from '../scripts/api_calls';
 
 // Hardcoded constants for now (could come from Auth Context later)
-const USER_ID = "user_14";
+const USER_ID = "user_17";
 const THREAD_ID = USER_ID;
 
 export const MainPage = () => {
@@ -227,7 +227,7 @@ export const MainPage = () => {
         {/* RIGHT: Chat Container with Flap */}
         <div 
           className={`relative hidden md:flex transition-all duration-300 ease-in-out ${
-            isChatOpen ? 'w-[400px]' : 'w-0'
+            isChatOpen ? 'w-[600px]' : 'w-0'
           }`}
         >
           {/* The Flap Toggle Button */}

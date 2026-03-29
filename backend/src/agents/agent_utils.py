@@ -24,8 +24,10 @@ class PlanState(TypedDict):
 
 # Agent types
 ORCHESTRATOR = "orchestrator"
-GOAL_FORMULATOR = "goal_formulator"
-MILESTONE_FORMULATOR = "milestone_formulator"
+# GOAL_FORMULATOR = "goal_formulator"
+# MILESTONE_FORMULATOR = "milestone_formulator"
+STRATEGIC_COACH = "strategic_coach"
+TECHNICAL_TRANSLATOR = "technical_translator"
 RESILIENCE_COACH = "resilience_coach"
 PLANNER = "planner"
 TRACKING_LOGGER = "tracking_logger"

@@ -50,9 +50,7 @@ def get_user_goals(user_id: str):
 def get_next_agent_using_intent(intent: str):
     next_agent = agent_utils.ORCHESTRATOR
     if intent == "GOAL_FORMATION":
-        next_agent = agent_utils.GOAL_FORMULATOR
-    elif intent == "MILESTONE_FORMATION":
-        next_agent = agent_utils.MILESTONE_FORMULATOR
+        next_agent = agent_utils.STRATEGIC_COACH
     elif intent == "MOTIVATION":
         next_agent = agent_utils.RESILIENCE_COACH
     elif intent == "DAY_PLANNING":
@@ -113,10 +111,11 @@ def update_state_on_response(state: PlanState, response: BaseMessage):
     to_user = response_json.get("to_user")
 
     if to_user:
-        logger.info(f"Adding message to user queue: {to_user[:50]}...")
-        state["to_user"].append(
-            AgentMessage(agent=agent_utils.ORCHESTRATOR, message=to_user)
-        )
+        pass
+        # logger.info(f"Adding message to user queue: {to_user[:50]}...")
+        # state["to_user"].append(
+        #     AgentMessage(agent=agent_utils.ORCHESTRATOR, message=to_user)
+        # )
 
     if intent:
         old_stage = state.get("stage", "None")
