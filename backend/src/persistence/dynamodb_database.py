@@ -1,286 +1,89 @@
-from decimal import Decimal
 import boto3
-from boto3.dynamodb.conditions import Key, Attr
-from typing import List, Dict, Optional, Any
-from concurrent.futures import ThreadPoolExecutor
-from schemas.core_v2 import Goal, Milestone, Tracker, LogEntry
+from typing import Dict, Any
+import json
+import logging
 
 
 class DynamoDBHandler:
     def __init__(self, region_name="us-east-1"):
         self.dynamodb = boto3.resource("dynamodb", region_name=region_name)
-
-        # Define Table references
+        # Assuming table has Partition Key: 'user_id'
         self.goals_table = self.dynamodb.Table("Goals")
-        self.milestones_table = self.dynamodb.Table("Milestones")
-        self.trackers_table = self.dynamodb.Table("Trackers")
-        # self.logs_table = self.dynamodb.Table("Logs")
 
-    # --- 1. The "Super Read" (Optimized for Frontend) ---
-    def get_full_user_state(self, user_id: str) -> Dict[str, Any]:
+    # --- 1. The Super Read (Now 1 Line of Logic) ---
+    def get_user_data(self, user_id: str) -> Dict[str, Any]:
         """
-        Fetches ALL goals, milestones, and trackers for a user in parallel.
-        Returns a hierarchical dictionary:
-        {
-            "goals": [
-                { ...goal_data, "milestones": [
-                    { ...milestone_data, "trackers": [ ... ] }
-                ]}
-            ]
-        }
+        Fetches the complete nested document for the user.
+        Structure: {"user_id": "...", "goals": [ { "milestones": [ { "trackers": [ {"logs": []} ] } ] } ] }
         """
-        with ThreadPoolExecutor() as executor:
-            future_goals = executor.submit(
-                self._query_all_by_user, self.goals_table, user_id
+        response = self.goals_table.get_item(Key={"user_id": user_id})
+        # Default to an empty structure if it's a brand new user
+        return response.get("Item", {"user_id": user_id, "goals": "[]"})
+
+    # --- 2. The Universal Mutation Engine ---
+    def process_operation(
+        self, user_id: str, operation: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Consumes an operation dictionary, applies the mutation to the in-memory document,
+        and saves the entire document back to DynamoDB.
+        """
+        user_data = self.get_user_data(user_id)
+        action = operation.get("action")
+        payload = operation.get("payload", {})
+
+        # --- CREATE / APPEND OPERATIONS ---
+        if action == "create_goal":
+            goals_str = user_data["goals"]
+            goals = json.loads(goals_str)
+            goals.append(payload.to_db_format())
+            modified_goals_str = json.dumps(goals)
+            user_data["goals"] = modified_goals_str
+
+        elif action == "create_milestone":
+            goal_id = operation.get("goal_id")
+            for goal in user_data["goals"]:
+                if goal.get("goal_id") == goal_id:
+                    goal.setdefault("milestones", []).append(payload)
+                    break
+
+        elif action == "create_tracker":
+            goal_id, milestone_id = operation.get("goal_id"), operation.get(
+                "milestone_id"
             )
-            future_milestones = executor.submit(
-                self._query_all_by_user, self.milestones_table, user_id
-            )
-            future_trackers = executor.submit(
-                self._query_all_by_user, self.trackers_table, user_id
-            )
+            for g in user_data["goals"]:
+                if g.get("goal_id") == goal_id:
+                    for m in g.get("milestones", []):
+                        if m.get("milestone_id") == milestone_id:
+                            m.setdefault("trackers", []).append(payload)
+                            break
 
-            goals_data = future_goals.result()
-            milestones_data = future_milestones.result()
-            trackers_data = future_trackers.result()
+        # --- LOGGING & UPDATING OPERATIONS ---
+        elif action == "log_update":
+            tracker_id = operation.get("tracker_id")
+            logging.info(f"Will update log with tracker id={tracker_id}")
 
-        # Reconstruct the Tree (In-Memory Join)
-        # This saves $$$ by avoiding complex Joins or 50 DB calls
+            goals_str = user_data["goals"]
+            goals = json.loads(goals_str)
 
-        # 1. Index Trackers by Milestone
-        trackers_by_milestone = {}
-        # breakpoint()
-        for t in trackers_data:
-            # Reconstruct Pydantic to ensure clean data, then dump back or keep as dict
-            # t_obj = Tracker.from_db_format(t)
-            m_id = t["milestone_id"]
-            if m_id not in trackers_by_milestone:
-                trackers_by_milestone[m_id] = []
-            trackers_by_milestone[m_id].append(
-                Tracker.from_db_format(t).model_dump(mode="json")
-            )
+            # Deep traversal to find the specific tracker
+            for g in goals:
+                for m in g.get("milestones", []):
+                    for t in m.get("trackers", []):
+                        logging.info(f"Current Tracker id={t.get('id', "")}")
+                        if t.get("id") == tracker_id:
 
-        # 2. Index Milestones by Goal
-        milestones_by_goal = {}
-        for m in milestones_data:
-            mtemp = Milestone.from_db_format(m).model_dump(mode="json")
-            mtemp["trackers"] = trackers_by_milestone.get(m["milestone_id"], [])
-            g_id = m["goal_id"]
-            if g_id not in milestones_by_goal:
-                milestones_by_goal[g_id] = []
-            milestones_by_goal[g_id].append(mtemp)
+                            # 1. Append the log
+                            t.setdefault("logs", []).append(payload.to_db_format())
+                            break
 
-        goals_nested = []
-        # 3. Attach to Goals
-        for g in goals_data:
-            gtemp = Goal.from_db_format(g).model_dump(mode="json")
-            gtemp["milestones"] = milestones_by_goal.get(g["goal_id"], [])
-            goals_nested.append(gtemp)
+            modified_goals_str = json.dumps(goals)
+            user_data["goals"] = modified_goals_str
 
-        return {"goals": goals_nested}
+        # Overwrite the document in DynamoDB with the mutated state
+        self.goals_table.put_item(Item=user_data)
 
-    # --- 2. Standard CRUD (Create) ---
-    def create_goal(self, goal: Goal):
-        self.goals_table.put_item(Item=goal.to_db_format())
+        goals = json.loads(user_data["goals"])
+        logging.info(f"New goals after process operation\n{goals}")
 
-    def create_milestone(self, milestone: Milestone):
-        self.milestones_table.put_item(Item=milestone.to_db_format())
-
-    def create_tracker(self, tracker: Tracker):
-        self.trackers_table.put_item(Item=tracker.to_db_format())
-
-    def log_tracker_update(self, update: LogEntry):
-        """
-        Reads the tracker, modifies (adds) the log, updates the aggregated value,
-        and writes the entire tracker back to DynamoDB.
-
-        Unsafe for concurrent updates to the same tracker, but simpler to implement and debug.
-        """
-        # 1. Read the tracker
-        tracker = self.get_tracker(update.user_id, update.tracker_id)
-        if not tracker:
-            raise ValueError(
-                f"Tracker {update.tracker_id} not found for user {update.user_id}"
-            )
-
-        timestamp_str = update.timestamp.isoformat()
-        log_value_str = str(update.value)
-        log_value_dec = Decimal(log_value_str)
-
-        # 2. Modify (add) the log
-        # Ensure the logs list exists on the tracker object
-        if not hasattr(tracker, "logs") or tracker.logs is None:
-            tracker.logs = []
-
-        tracker.logs.append({"date": timestamp_str, "value": log_value_str})
-
-        # 3. Update the tracker's top-level aggregation values
-        if tracker.metric_type == "SUM":
-            tracker.current_value = (
-                tracker.current_value or Decimal("0")
-            ) + log_value_dec
-            tracker.last_log_date = timestamp_str
-
-        elif tracker.metric_type in ["LATEST", "BOOLEAN"]:
-            # Conditional update: Only overwrite if this log is newer
-            if not tracker.last_log_date or timestamp_str > tracker.last_log_date:
-                tracker.current_value = log_value_dec
-                tracker.last_log_date = timestamp_str
-
-        # 4. Write it back
-        self.update_tracker(tracker)
-
-    def log_tracker_update_vm1(self, update: LogEntry, tracker: Tracker):
-        """
-        Atomically writes the log and updates the tracker aggregation.
-        """
-        # TransactWriteItems requires the low-level client
-        client = self.dynamodb.meta.client
-
-        timestamp_str = update.timestamp.isoformat()
-        log_value_str = str(update.value)  # Boto3 client requires numbers as strings
-        # breakpoint()
-
-        # 1. Prepare the Put operation for the Logs table
-        # Based on your get_history_logs, PK is 'user_id' and SK is 'sk'
-        log_put = {
-            "Put": {
-                "TableName": self.logs_table.name,
-                "Item": {
-                    "user_id": update.user_id,
-                    "sk": f"{update.tracker_id}#{timestamp_str}",
-                    "timestamp": timestamp_str,
-                    "value": log_value_str,
-                    "tracker_id": update.tracker_id,
-                },
-            }
-        }
-
-        # 2. Prepare the Update operation for the Trackers table
-        tracker_key = {
-            "user_id": tracker.user_id,
-            "tracker_id": tracker.tracker_id,
-        }
-
-        update_action = {}
-
-        if tracker.metric_type == "SUM":
-            # Atomic addition (safe for concurrent requests)
-            update_action = {
-                "Update": {
-                    "TableName": self.trackers_table.name,
-                    "Key": tracker_key,
-                    "UpdateExpression": "SET current_value = current_value + :val, last_log_date = :ts",
-                    "ExpressionAttributeValues": {
-                        ":val": Decimal(
-                            log_value_str
-                        ),  # DynamoDB expects Decimal for numbers
-                        ":ts": timestamp_str,
-                    },
-                }
-            }
-        elif tracker.metric_type in ["LATEST", "BOOLEAN"]:
-            # Conditional update: Only overwrite if this log is newer
-            update_action = {
-                "Update": {
-                    "TableName": self.trackers_table.name,
-                    "Key": tracker_key,
-                    "UpdateExpression": "SET current_value = :val, last_log_date = :ts",
-                    "ConditionExpression": "attribute_not_exists(last_log_date) OR last_log_date < :ts",
-                    "ExpressionAttributeValues": {
-                        ":val": Decimal(log_value_str),
-                        ":ts": timestamp_str,
-                    },
-                }
-            }
-
-        # 3. Execute the Transaction
-        try:
-            client.transact_write_items(
-                TransactItems=[log_put, update_action]
-            )  # update_action (DEBUG: DOESN"T WORK WITH THIS)
-        except client.exceptions.TransactionCanceledException as e:
-            # Check if the transaction was canceled because of our ConditionExpression
-            # This happens if a delayed log arrives for a LATEST/BOOLEAN tracker.
-            if "ConditionalCheckFailed" in str(e):
-                # We still want to save the historical log, we just don't want it
-                # to overwrite the newer 'current_value' on the tracker.
-                # Use the high-level resource here for a simple put.
-                self.logs_table.put_item(
-                    Item={
-                        "user_id": update.user_id,
-                        "sk": f"{update.tracker_id}#{timestamp_str}",
-                        "timestamp": timestamp_str,
-                        "value": Decimal(log_value_str),  # Resource requires Decimal
-                        "tracker_id": update.tracker_id,
-                    }
-                )
-            else:
-                # Re-raise if it failed for any other reason (capacity, permissions, etc.)
-                breakpoint()
-                raise e
-
-    # --- 3. Optimized Reads ---
-    def _query_all_by_user(self, table, user_id: str) -> List[Dict]:
-        """Helper to fetch all items for a partition key."""
-        response = table.query(KeyConditionExpression=Key("user_id").eq(user_id))
-        return response.get("Items", [])
-
-    def get_history_logs(
-        self, user_id: str, tracker_id: str, limit: int = 30
-    ) -> List[Dict[str, str]]:
-        """
-        Fetches logs specifically for ONE tracker directly from the embedded logs array.
-        Returns them newest first, up to the limit.
-        """
-        tracker = self.get_tracker(user_id, tracker_id)
-
-        # Check if tracker exists and has logs
-        if not tracker or not hasattr(tracker, "logs") or not tracker.logs:
-            return []
-
-        # Sort logs by date descending (newest first) to mimic ScanIndexForward=False
-        sorted_logs = sorted(
-            tracker.logs, key=lambda x: x.get("date", ""), reverse=True
-        )
-
-        return sorted_logs[:limit]
-
-    def get_goals_for_user(self, user_id: str) -> List[Goal]:
-        """Fetches all goals for a user and parses them into Goal Pydantic models."""
-        items = self._query_all_by_user(self.goals_table, user_id)
-        return [Goal.from_db_format(item) for item in items]
-
-    def get_milestones(self, user_id: str, goal_id: str = None) -> Dict[str, Any]:
-        """Fetches milestones for a user and given goal. If no goal is given, fetch all"""
-        milestones = self._query_all_by_user(self.milestones_table, user_id)
-
-        milestones = [
-            Milestone.from_db_format(m)
-            for m in milestones
-            if not goal_id or m["goal_id"] == goal_id
-        ]
-
-        return milestones
-
-    def get_tracker(self, user_id: str, tracker_id: str) -> Optional[Tracker]:
-        """Fetches a single tracker by user_id and tracker_id."""
-        response = self.trackers_table.get_item(
-            Key={"user_id": user_id, "tracker_id": tracker_id}
-        )
-        item = response.get("Item")
-        if item:
-            return Tracker.from_db_format(item)
-        return None
-
-    # --- 4. Updates (Overwrite Strategy) ---
-    # In DynamoDB + Pydantic, it's often safer to PUT (overwrite) the whole item
-    # than to try and PATCH specific fields, unless you have massive documents.
-    def update_goal(self, goal: Goal):
-        self.goals_table.put_item(Item=goal.to_db_format())
-
-    def update_milestone(self, milestone: Milestone):
-        self.milestones_table.put_item(Item=milestone.to_db_format())
-
-    def update_tracker(self, tracker: Tracker):
-        self.trackers_table.put_item(Item=tracker.to_db_format())
+        return goals

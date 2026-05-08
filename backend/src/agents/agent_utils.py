@@ -13,35 +13,43 @@ class AgentMessage(TypedDict):
 
 # --- 1. Define the State ---
 class PlanState(TypedDict):
-    message_history: list[BaseMessage]
-    current_context: list[BaseMessage]
-    last_user_message: HumanMessage
-    user_id: str
-    structured_data: dict
-    stage: str
-    to_user: List[AgentMessage]
+    user_context_num_iterations: int
+    user_context_status: Optional[str]
+    message_to_user: Optional[str]
+    message_from_user: Optional[str]
+    message_history: Optional[List]  # To keep track of the conversation history
+
+    proposed_plan: Optional[str]
+    validator_comments: Optional[str]
+    previous_design: Optional[str]
+    user_context: Optional[str]
+    num_iterations: int
+    user_id: Optional[str]
+
+    structured_data: Optional[dict]  # For storing structured outputs from agents
 
 
 # Agent types
-ORCHESTRATOR = "orchestrator"
-# GOAL_FORMULATOR = "goal_formulator"
-# MILESTONE_FORMULATOR = "milestone_formulator"
-STRATEGIC_COACH = "strategic_coach"
+USER_CONTEXT_ACQUIRER = "user_context_acquirer"
+GOAL_PLANNER = "goal_planner"
+GOAL_VALIDATOR = "goal_validator"
 TECHNICAL_TRANSLATOR = "technical_translator"
-RESILIENCE_COACH = "resilience_coach"
-PLANNER = "planner"
-TRACKING_LOGGER = "tracking_logger"
 
 
 def initialize_state() -> PlanState:
     return PlanState(
+        user_context_num_iterations=0,
+        user_context_status="INCOMPLETE",
         message_history=[],
-        current_context=[],
-        last_user_message=HumanMessage(content=""),
-        user_id="",  # In real app, this would come from auth/session
+        message_to_user=None,
+        message_from_user=None,
+        proposed_plan=None,
+        validator_comments=None,
+        previous_design=None,
+        user_context=None,
+        num_iterations=0,
+        user_id=None,
         structured_data={},
-        stage="orchestrator",  # Start at orchestrator
-        to_user=[],
     )
 
 

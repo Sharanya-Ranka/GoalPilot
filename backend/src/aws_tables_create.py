@@ -25,47 +25,9 @@ def create_tables():
             "TableName": "Goals",
             "KeySchema": [
                 {"AttributeName": "user_id", "KeyType": "HASH"},  # Partition Key
-                {"AttributeName": "goal_id", "KeyType": "RANGE"},  # Sort Key
             ],
             "AttributeDefinitions": [
                 {"AttributeName": "user_id", "AttributeType": "S"},
-                {"AttributeName": "goal_id", "AttributeType": "S"},
-            ],
-        },
-        {
-            "TableName": "Milestones",
-            "KeySchema": [
-                {"AttributeName": "user_id", "KeyType": "HASH"},
-                {"AttributeName": "milestone_id", "KeyType": "RANGE"},
-            ],
-            "AttributeDefinitions": [
-                {"AttributeName": "user_id", "AttributeType": "S"},
-                {"AttributeName": "milestone_id", "AttributeType": "S"},
-            ],
-        },
-        {
-            "TableName": "Trackers",
-            "KeySchema": [
-                {"AttributeName": "user_id", "KeyType": "HASH"},
-                {"AttributeName": "tracker_id", "KeyType": "RANGE"},
-            ],
-            "AttributeDefinitions": [
-                {"AttributeName": "user_id", "AttributeType": "S"},
-                {"AttributeName": "tracker_id", "AttributeType": "S"},
-            ],
-        },
-        {
-            "TableName": "Logs",
-            "KeySchema": [
-                {"AttributeName": "user_id", "KeyType": "HASH"},
-                {
-                    "AttributeName": "sk",
-                    "KeyType": "RANGE",
-                },  # Our composite key (tracker_id#date)
-            ],
-            "AttributeDefinitions": [
-                {"AttributeName": "user_id", "AttributeType": "S"},
-                {"AttributeName": "sk", "AttributeType": "S"},
             ],
         },
         {

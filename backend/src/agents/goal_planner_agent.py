@@ -2,7 +2,7 @@ import logging
 from typing import List
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, BaseMessage
-from prompts.prompts import TECHNICAL_TRANSLATOR_PROMPT
+from prompts.prompts import GOAL_PLANNER_PROMPT
 from agents.agent_utils import (
     extract_json,
     fill_prompt_template,
@@ -11,8 +11,6 @@ from agents.agent_utils import (
 )
 import agents.agent_utils as agent_utils
 from llms.openai_api import low_reasoning_gpt5mini
-from schemas.core import Goal
-import json
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -21,10 +19,11 @@ logger = logging.getLogger(__name__)
 def get_full_context(state: PlanState):
     system_message = SystemMessage(
         content=fill_prompt_template(
-            TECHNICAL_TRANSLATOR_PROMPT,
+            GOAL_PLANNER_PROMPT,
             dict(
                 user_context=state.get("user_context", "None"),
-                proposed_plan=state.get("proposed_plan", "None"),
+                previous_design=state.get("previous_design", "None"),
+                validator_comments=state.get("validator_comments", "None"),
             ),
         )
     )
@@ -33,21 +32,14 @@ def get_full_context(state: PlanState):
 
 
 def update_state_on_response(state: PlanState, response: BaseMessage):
-    try:
-        response_json = extract_json(response.content)
-        state["structured_data"]["goal_json"] = response_json
-        state["structured_data"]["goal_structured"] = Goal.model_validate_json(
-            json.dumps(response_json)
-        )
-    except Exception as e:
-        logger.error(f"JSON extraction failed in Technical Translator: {e}")
-        response_json = {}
+    response = response.content
+    state["proposed_plan"] = response
 
     return state
 
 
-def run_technical_translator(state: PlanState):
-    logger.info(f"--- Node: Technical Translator | User: {state.get('user_id')} ---")
+def run_goal_planner(state: PlanState):
+    logger.info(f"--- Node: Goal Planner | User: {state.get('user_id')} ---")
 
     context, updated_state = get_full_context(state)
 
@@ -57,4 +49,5 @@ def run_technical_translator(state: PlanState):
         return state
 
     new_state = update_state_on_response(updated_state, response)
+    # logger.info(f"Transitioning to stage: {new_state.get('stage')}")
     return new_state

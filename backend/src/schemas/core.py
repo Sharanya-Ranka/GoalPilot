@@ -1,92 +1,84 @@
 # schemas.py
-from typing import List, Dict, Any, Optional, Literal, Union
+import json
+from typing import List, Dict, Any, Optional, Literal, Union, Tuple
 from pydantic import BaseModel, Field
 from typing_extensions import Annotated
 import uuid
 from datetime import datetime
 import secrets
 import string
+from decimal import Decimal
+
+from typing import Literal, Optional, List, Tuple
+from pydantic import BaseModel
 
 
-def generate_real_id():
+# ==========================================
+# 1. Types & Interfaces
+# ==========================================
+def generate_uuid() -> str:
     return str(uuid.uuid4())
 
 
-def generate_id(length=4):
-    # Use uppercase, lowercase, and digits
-    alphabet = string.ascii_letters + string.digits
-    return "".join(secrets.choice(alphabet) for _ in range(length))
+# Using Literal is the direct equivalent of a TypeScript string union type
+AggregationStrategy = Literal["SUM", "MEAN", "MIN", "MAX", "ONE-TIME", "ALL"]
 
 
-# --- 1. Polymorphic Tracker Configs (The "kwargs" solution) ---
-class AchievementMetric(BaseModel):
-    type: Literal["ACHIEVEMENT"]
-    log_prompt: str
+class Log(BaseModel):
+    date: str
+    value: float  # TS 'number' maps best to float, but you can use int if these are strictly integers
+    log_message: Optional[str] = None
+
+    def to_db_format(self) -> Dict[str, Any]:
+        """
+        Prepares the Goal for storage.
+        Values are typically stored in plaintext columns for easier querying.
+        """
+        return json.loads(self.model_dump_json())
 
 
-class CumulativeMetric(BaseModel):
-    type: Literal["CUMULATIVE"]
-    log_prompt: str
-    min: float = 0
-    max: float
-    target: float
-    target_type: Literal["higher better", "lower better"]
-
-
-class TargetMetric(BaseModel):
-    type: Literal["TARGET"]
-    log_prompt: str
-    window: int
-    target_type: str
-    min: float = 0
-    max: float = 0
-    target: Optional[float] = None
-    target_min: Optional[float] = None
-    target_max: Optional[float] = None
-
-
-# The Union Type
-TrackerConfig = Annotated[
-    Union[AchievementMetric, CumulativeMetric, TargetMetric],
-    Field(discriminator="type"),
-]
-
-# --- 2. Main Domain Models ---
-
-
-class MilestoneTracking(BaseModel):
-    id: str = Field(default_factory=generate_id)
-    # milestone_id: str = ""
-    # name: str
-    # We nest the specific config here
-    config: TrackerConfig
-    history: Dict[str, Any] = Field(default_factory=dict)
+class Tracker(BaseModel):
+    id: str = Field(default_factory=generate_uuid)
+    name_id: Optional[str] = None
+    name: str
+    info: str
+    metric: str
+    strategy: AggregationStrategy
+    # A fixed-length array in TS becomes a Tuple in Python
+    target: Tuple[Optional[float], Optional[float]]
+    window: float
+    success_criteria: float
+    logs: List[Log] = Field(default_factory=list)
 
 
 class Milestone(BaseModel):
-    id: str = Field(default_factory=generate_id)
-    # goal_id: str
+    id: str = Field(default_factory=generate_uuid)
+    name_id: Optional[str] = None
     statement: str
-    status: str = "pending"
-    tracking: List[MilestoneTracking] = Field(default_factory=list)
+    trackers: List[Tracker]
 
 
 class Goal(BaseModel):
-    id: str = Field(default_factory=generate_id)
-    user_id: str
-    what: str
-    when: str
-    why: str
-    milestones: List[Milestone] = Field(default_factory=list)
+    id: str = Field(default_factory=generate_uuid)
+    name_id: Optional[str] = None
+    title: str
+    description: str
+    milestones: List[Milestone]
+
+    def to_db_format(self) -> Dict[str, Any]:
+        """
+        Prepares the Goal for storage.
+        Values are typically stored in plaintext columns for easier querying.
+        """
+        return json.loads(self.model_dump_json())
+
+    @classmethod
+    def from_db_format(cls, data: Dict[str, Any]) -> "Goal":
+        return cls(**data)
 
 
-# --- 3. Interaction Models ---
-
-
-class TrackerUpdate(BaseModel):
-    tracker_id: str
-    date: str = Field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d"))
-    value: Any
+class AllGoals(BaseModel):
+    goals: List[Goal]
 
 
 class UserRequest(BaseModel):

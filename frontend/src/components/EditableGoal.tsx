@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import type { GoalData, Milestone, Tracker } from '../types';
+import type { Goal, Milestone, Tracker } from '../types';
 
 // ==========================================
 // 2. Helper: Inline Edit Component
@@ -18,6 +18,7 @@ const InlineEdit = ({ value, onChange, multiline, textClass, inputClass, placeho
   const [isEditing, setIsEditing] = useState(false);
   const [tempValue, setTempValue] = useState(value);
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
+  console.log(placeholder, " value, tempvalue is ", value, tempValue)
 
   useEffect(() => {
     if (isEditing && inputRef.current) {
@@ -25,12 +26,19 @@ const InlineEdit = ({ value, onChange, multiline, textClass, inputClass, placeho
     }
   }, [isEditing]);
 
+  useEffect(() => {
+    if (!isEditing) {
+      setTempValue(value);
+    }
+  }, [value, isEditing]);
+
   const handleBlurOrSubmit = () => {
     setIsEditing(false);
     if (tempValue !== value) onChange(tempValue);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    console.log(placeholder, " Triggering keydown ")
     if (e.key === 'Enter' && !multiline) handleBlurOrSubmit();
     if (e.key === 'Escape') {
       setTempValue(value); // Revert
@@ -47,6 +55,8 @@ const InlineEdit = ({ value, onChange, multiline, textClass, inputClass, placeho
       className: `w-full border-2 border-indigo-400 rounded outline-none px-2 py-1 ${inputClass || ''}`,
       placeholder
     };
+
+    console.log(placeholder, " Setting value to ", commonProps.value)
 
     return multiline ? (
       <textarea ref={inputRef as any} {...commonProps} rows={3} />
@@ -70,8 +80,18 @@ const InlineEdit = ({ value, onChange, multiline, textClass, inputClass, placeho
 // 3. Editable Tracker Component
 // ==========================================
 const EditableTracker = ({ tracker, onUpdate }: { tracker: Tracker; onUpdate: (t: Tracker) => void }) => {
-  const handleChange = (field: keyof Tracker, value: any) => {
-    onUpdate({ ...tracker, [field]: value });
+  const handleChange = (field: string, value: any) => {
+    if (field == "targetMax"){
+      onUpdate({...tracker, target:[tracker.target[0], value]})
+    }
+    else if (field == "targetMin"){
+      onUpdate({...tracker, target:[value, tracker.target[1]]})
+    }
+    else{
+      onUpdate({ ...tracker, [field]: value });
+    }
+      
+
   };
 
   return (
@@ -108,8 +128,8 @@ const EditableTracker = ({ tracker, onUpdate }: { tracker: Tracker; onUpdate: (t
         <div className="flex flex-col">
           <label className="text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">Aggregation Strategy</label>
           <select 
-            value={tracker.aggregationStrategy}
-            onChange={(e) => handleChange('aggregationStrategy', e.target.value)}
+            value={tracker.strategy}
+            onChange={(e) => handleChange('strategy', e.target.value)}
             className="border border-gray-300 rounded-md text-sm px-3 py-1.5 focus:border-indigo-500 outline-none"
           >
             {['SUM', 'MEAN', 'MIN', 'MAX', 'ONE-TIME', 'ALL'].map(strat => (
@@ -124,7 +144,7 @@ const EditableTracker = ({ tracker, onUpdate }: { tracker: Tracker; onUpdate: (t
             <input 
               type="number" 
               placeholder="Min" 
-              value={tracker.targetMin === null ? '' : tracker.targetMin}
+              value={tracker.target[0] === null ? '' : tracker.target[0]}
               onChange={(e) => handleChange('targetMin', e.target.value === '' ? null : Number(e.target.value))}
               className="w-full border border-gray-300 rounded-md text-sm px-3 py-1.5 outline-none"
             />
@@ -132,7 +152,7 @@ const EditableTracker = ({ tracker, onUpdate }: { tracker: Tracker; onUpdate: (t
             <input 
               type="number" 
               placeholder="Max" 
-              value={tracker.targetMax === null ? '' : tracker.targetMax}
+              value={tracker.target[1] === null ? '' : tracker.target[1]}
               onChange={(e) => handleChange('targetMax', e.target.value === '' ? null : Number(e.target.value))}
               className="w-full border border-gray-300 rounded-md text-sm px-3 py-1.5 outline-none"
             />
@@ -144,8 +164,8 @@ const EditableTracker = ({ tracker, onUpdate }: { tracker: Tracker; onUpdate: (t
           <input 
             type="number" 
             min="1"
-            value={tracker.windowNumDays}
-            onChange={(e) => handleChange('windowNumDays', Number(e.target.value))}
+            value={tracker.window}
+            onChange={(e) => handleChange('window', Number(e.target.value))}
             className="border border-gray-300 rounded-md text-sm px-3 py-1.5 outline-none"
           />
         </div>
@@ -155,8 +175,8 @@ const EditableTracker = ({ tracker, onUpdate }: { tracker: Tracker; onUpdate: (t
           <input 
             type="number" 
             min="1"
-            value={tracker.successCriteria}
-            onChange={(e) => handleChange('successCriteria', Number(e.target.value))}
+            value={tracker.success_criteria}
+            onChange={(e) => handleChange('success_criteria', Number(e.target.value))}
             className="border border-gray-300 rounded-md text-sm px-3 py-1.5 outline-none"
           />
         </div>
@@ -177,11 +197,11 @@ const EditableMilestone = ({ milestone, onUpdate }: { milestone: Milestone; onUp
       name: '',
       info: '',
       metric: '',
-      aggregationStrategy: 'SUM',
-      targetMin: null,
-      targetMax: null,
-      windowNumDays: 1,
-      successCriteria: 1,
+      strategy: 'SUM',
+      target: [null, null],
+      window: 1,
+      success_criteria: 1,
+      logs: []
     };
     onUpdate({ ...milestone, trackers: [...milestone.trackers, newTracker] });
   };
@@ -222,9 +242,9 @@ const EditableMilestone = ({ milestone, onUpdate }: { milestone: Milestone; onUp
 // ==========================================
 // 5. Main Editable Goal Component
 // ==========================================
-export default function EditableGoal({ goalData, setGoalData }: { goalData: GoalData; setGoalData: (goal: GoalData) => void }) {
+export default function EditableGoal({ goalData, setGoalData }: { goalData: Goal; setGoalData: (goal: Goal) => void }) {
 
-  const goal: GoalData = goalData
+  const goal: Goal = goalData
   
   const addMilestone = () => {
     const newMilestone: Milestone = {
@@ -259,13 +279,13 @@ export default function EditableGoal({ goalData, setGoalData }: { goalData: Goal
           placeholder="Goal Description" 
           multiline
         />
-        <InlineEdit 
+        {/* <InlineEdit 
           value={goal.info} 
           onChange={(v) => setGoalData({ ...goal, info: v })} 
           textClass="text-sm text-gray-400" 
           placeholder="Additional Information" 
           multiline
-        />
+        /> */}
       </div>
 
       {/* <hr className="my-6 border-gray-900" /> */}
@@ -292,12 +312,12 @@ export default function EditableGoal({ goalData, setGoalData }: { goalData: Goal
       </div>
 
       {/* Demo: See the resulting JSON */}
-      <div className="mt-12 p-4 bg-gray-800 rounded-lg overflow-x-auto">
+      {/* <div className="mt-12 p-4 bg-gray-800 rounded-lg overflow-x-auto">
         <p className="text-gray-400 text-xs mb-2 uppercase tracking-widest">State Debug Output</p>
         <pre className="text-emerald-400 text-xs">
           {JSON.stringify(goal, null, 2)}
         </pre>
-      </div>
+      </div> */}
 
     </div>
   );

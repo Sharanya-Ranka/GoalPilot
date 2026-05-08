@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import type { GoalData, Milestone, Tracker } from '../types';
-import { mockGoals } from '../constants';
+import type { Goal, Milestone, Tracker, Log } from '../types';
+import useTestStore from '../store/useTestStore';
+import { handleCreateLog } from "../commService";
 
 // --- Types ---
 export interface LogEntry {
@@ -11,23 +12,44 @@ export interface LogEntry {
   message?: string;
 }
 
-// Flattened structure to make rendering the list easier
+// Keeping this for the top graph lookup, though it's removed from rendering
 interface FlattenedTracker {
-  goal: GoalData;
+  goal: Goal;
   milestone: Milestone;
   tracker: Tracker;
 }
 
 // --- Log Card Component ---
+// Modified to only take Tracker, as Goal/Milestone context is handled by the parent slabs now
 interface LogCardProps {
-  data: FlattenedTracker;
+  tracker: Tracker;
   isFocused: boolean;
   onFocus: () => void;
-  onSave: (log: Omit<LogEntry, 'id' | 'trackerId'>) => void;
+  onSave: (log: Log) => void;
 }
+// Added helper function to calculate time ago
+const getTimeAgo = (dateString: string) => {
+  const logDate = new Date(dateString);
+  const today = new Date();
+  
+  // Calculate difference in milliseconds
+  const diffTime = today.getTime() - logDate.getTime();
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
 
-const LogCard = ({ data, isFocused, onFocus, onSave }: LogCardProps) => {
-  const { goal, milestone, tracker } = data;
+  if (diffDays === 0) return "today";
+  if (diffDays === 1) return "1 day ago";
+  if (diffDays < 30) return `${diffDays} days ago`;
+
+  const diffMonths = Math.floor(diffDays / 30);
+  if (diffMonths === 1) return "1 month ago";
+  if (diffMonths < 12) return `${diffMonths} months ago`;
+
+  const diffYears = Math.floor(diffDays / 365);
+  if (diffYears === 1) return "1 year ago";
+  return `${diffYears} years ago`;
+};
+
+const LogCard = ({ tracker, isFocused, onFocus, onSave }: LogCardProps) => {
   const [showInfo, setShowInfo] = useState(false);
   
   // Form State
@@ -42,38 +64,38 @@ const LogCard = ({ data, isFocused, onFocus, onSave }: LogCardProps) => {
     onSave({
       date: logDate,
       value: Number(logValue),
-      message: logMessage.trim() || undefined
+      log_message: logMessage.trim() || undefined
     });
 
-    // Reset form after saving
     setLogValue('');
     setLogMessage('');
-    // Optional: Could unfocus here, or keep open
   };
+
+  // 1. Safely extract and sort logs (newest first)
+  const sortedLogs = [...(tracker.logs || [])].sort(
+    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+  );
+  
+  // 2. Grab the top 2 most recent logs
+  const lastTwoLogs = sortedLogs.slice(0, 2);
+  const mostRecentLogDate = sortedLogs.length > 0 ? sortedLogs[0].date : null;
 
   return (
     <div 
       onClick={onFocus}
       className={`
-        bg-white border rounded-xl p-5 cursor-pointer transition-all duration-300 ease-in-out
+        bg-white border rounded-xl p-5 cursor-pointer transition-all duration-300 ease-in-out flex-1
         ${isFocused ? 'border-indigo-500 shadow-md ring-1 ring-indigo-500' : 'border-gray-200 shadow-sm hover:border-indigo-300 hover:shadow'}
       `}
     >
-      {/* Header / Context */}
+      {/* Header */}
       <div className="flex justify-between items-start gap-4">
-        <div>
-          <div className="text-xs font-semibold text-gray-400 mb-1 flex items-center gap-2 flex-wrap">
-            <span className="truncate max-w-[150px]" title={goal.title}>{goal.title}</span>
-            <span>›</span>
-            <span className="truncate max-w-[200px]" title={milestone.statement}>{milestone.statement}</span>
-          </div>
-          <h3 className="text-lg font-bold text-gray-800">{tracker.name}</h3>
-        </div>
+        <h3 className="text-lg font-bold text-gray-800">{tracker.name}</h3>
         
         {/* Info Toggle Button */}
         <button 
           onClick={(e) => {
-            e.stopPropagation(); // Prevent triggering the card focus
+            e.stopPropagation();
             setShowInfo(!showInfo);
           }}
           className="text-gray-400 hover:text-indigo-600 transition-colors p-1"
@@ -85,20 +107,24 @@ const LogCard = ({ data, isFocused, onFocus, onSave }: LogCardProps) => {
         </button>
       </div>
 
-      {/* Auxiliary Info (Collapsible) */}
+      {/* Auxiliary Info */}
       {showInfo && (
         <div className="mt-3 p-3 bg-indigo-50/50 rounded-lg border border-indigo-100 text-sm text-gray-600 animate-in slide-in-from-top-2 fade-in">
           <p className="mb-1">{tracker.info}</p>
           <p className="font-medium text-indigo-800 text-xs mt-2">
-            Target: {tracker.targetMin ?? '0'} {tracker.targetMax ? `- ${tracker.targetMax}` : '+'} {tracker.metric} 
-            {' '} • Window: {tracker.windowNumDays} days
+            Target: {tracker.target[0] ?? '0'} {tracker.target[1] ? `- ${tracker.target[1]}` : '+'} {tracker.metric} 
+            {' '} • Window: {tracker.window} days
           </p>
         </div>
       )}
 
-      {/* Expanded Input Form (Visible only when focused) */}
+      {/* Expanded Content (Visible only when clicked/focused) */}
       {isFocused && (
         <div className="mt-4 pt-4 border-t border-gray-100 animate-in slide-in-from-top-4 fade-in duration-300">
+          
+          
+
+          {/* Input Form */}
           <form onSubmit={handleSubmit} className="flex flex-col gap-3">
             <div className="flex gap-3">
               <div className="flex-1">
@@ -117,7 +143,7 @@ const LogCard = ({ data, isFocused, onFocus, onSave }: LogCardProps) => {
                   type="number" 
                   value={logValue}
                   onChange={(e) => setLogValue(e.target.value === '' ? '' : Number(e.target.value))}
-                  placeholder={`e.g., ${tracker.targetMin || 1}`}
+                  placeholder={`e.g., ${tracker.target[0] || 1}`}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                   required
                 />
@@ -145,39 +171,69 @@ const LogCard = ({ data, isFocused, onFocus, onSave }: LogCardProps) => {
               </button>
             </div>
           </form>
+
+          {/* Recent Logs History Section */}
+          <div className="mb-5 bg-slate-50 p-3 rounded-lg border border-slate-100">
+            {sortedLogs.length === 0 ? (
+              <p className="text-sm text-slate-500 italic font-medium">No logs yet</p>
+            ) : (
+              <>
+                <p className="text-xs font-bold text-indigo-600 uppercase tracking-wide mb-2">
+                  Last log {getTimeAgo(mostRecentLogDate!)}
+                </p>
+                <div className="overflow-hidden border border-slate-200 rounded-md">
+                  <table className="w-full text-left text-sm text-slate-600">
+                    <thead className="bg-slate-100 text-slate-500 uppercase text-[10px] font-bold">
+                      <tr>
+                        <th className="px-3 py-1.5">Date</th>
+                        <th className="px-3 py-1.5">Value</th>
+                        <th className="px-3 py-1.5">Message</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 bg-white">
+                      {lastTwoLogs.map((log, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="px-3 py-1.5 whitespace-nowrap text-xs">{log.date}</td>
+                          <td className="px-3 py-1.5 font-medium">{log.value}</td>
+                          <td className="px-3 py-1.5 text-xs truncate max-w-[120px]" title={log.log_message}>
+                            {log.log_message || <span className="text-slate-300 italic">None</span>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+        </div>
         </div>
       )}
     </div>
   );
 };
-
 // --- Main Page Component ---
 export default function LogProgress() {
   const [focusedTrackerId, setFocusedTrackerId] = useState<string | null>(null);
   
-//   // This state is just to prove the logging works UI-wise. 
-//   // In your real app, this would go to your store or backend.
-//   const [savedLogs, setSavedLogs] = useState<LogEntry[]>([]);
+  const userGoals = useTestStore((state) => state.userGoals);
+  const userId = useTestStore((state) => state.userId);
+  const setUserGoals = useTestStore((state) => state.setUserGoals);
 
-  // 1. Flatten the mock goals to easily iterate over all trackers
-  const flatTrackers: FlattenedTracker[] = mockGoals.flatMap(goal => 
+  // Still useful for a quick lookup by ID for the graph rendering area
+  const flatTrackers: FlattenedTracker[] = userGoals.flatMap(goal => 
     goal.milestones.flatMap(milestone => 
       milestone.trackers.map(tracker => ({ goal, milestone, tracker }))
     )
   );
 
-  const handleSaveLog = (trackerId: string, logData: Omit<LogEntry, 'id' | 'trackerId'>) => {
-    const newLog: LogEntry = {
-      id: crypto.randomUUID(),
-      trackerId,
-      ...logData
-    };
-    // setSavedLogs(prev => [...prev, newLog]);
-    console.log("Saved Log:", newLog);
+  const handleSaveLog = async (trackerId: string, log: Log) => {
+    console.log("Attempting to save log", log)
+    const newUserData = await handleCreateLog(userId, trackerId, log)
+    setUserGoals(newUserData)
+    console.log("Saved Log:", log);
   };
 
   return (
-    // h-screen and flex-col allow the top area to stay fixed while the bottom scrolls
     <div className="h-screen flex flex-col bg-slate-50">
       
       {/* TOP AREA: Graph Placeholder */}
@@ -195,20 +251,66 @@ export default function LogProgress() {
         </div>
       </div>
 
-      {/* BOTTOM AREA: Scrollable List */}
+      {/* BOTTOM AREA: Scrollable List with Nested Grouping Slabs */}
       <div className="flex-1 overflow-y-auto p-8">
-        <div className="max-w-3xl mx-auto">
+        <div className="max-w-4xl mx-auto">
           <h2 className="text-2xl font-bold text-gray-800 mb-6">Log Progress 📈</h2>
           
-          <div className="flex flex-col gap-4 pb-20">
-            {flatTrackers.map((item) => (
-              <LogCard 
-                key={item.tracker.id}
-                data={item}
-                isFocused={focusedTrackerId === item.tracker.id}
-                onFocus={() => setFocusedTrackerId(item.tracker.id)}
-                onSave={(logData) => handleSaveLog(item.tracker.id, logData)}
-              />
+          <div className="flex flex-col gap-6 pb-20">
+            {/* Map 1: Goals */}
+            {userGoals.map((goal) => (
+              <div key={goal.id} className="flex bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                
+                {/* Level 1 Slab (Goal) */}
+                <div className="w-8 md:w-10 bg-gradient-to-b from-indigo-500 to-indigo-700 border-r border-indigo-800 flex-shrink-0 flex items-center justify-center relative group cursor-help transition-all shadow-[inset_0_1px_1px_rgba(255,255,255,0.4)] hover:from-indigo-400 hover:to-indigo-600">
+                  {/* Goal Tooltip */}
+                  <div className="absolute left-full ml-2 top-4 w-64 p-3 bg-slate-900 text-white rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none">
+                    <div className="font-bold mb-1 text-sm">{goal.title}</div>
+                    <div className="text-slate-300 text-xs">{goal.description}</div>
+                  </div>
+                  {/* Vertical Text */}
+                  <span className="[writing-mode:vertical-lr] rotate-180 text-white font-black tracking-widest text-xs uppercase drop-shadow-md">
+                    Goal
+                  </span>
+                </div>
+
+                {/* Milestones Container */}
+                <div className="flex-1 flex flex-col p-3 gap-4 bg-slate-50/50">
+                  
+                  {/* Map 2: Milestones */}
+                  {goal.milestones.map((milestone) => (
+                    <div key={milestone.id} className="flex bg-white rounded-lg shadow-sm border border-slate-100">
+                      
+                      {/* Level 2 Slab (Milestone) */}
+                      <div className="w-6 md:w-8 bg-gradient-to-b from-emerald-400 to-emerald-600 border-r border-emerald-700 flex-shrink-0 rounded-l-lg flex items-center justify-center relative group cursor-help transition-all shadow-[inset_0_1px_1px_rgba(255,255,255,0.4)] hover:from-emerald-300 hover:to-emerald-500">
+                        {/* Milestone Tooltip */}
+                        <div className="absolute left-full ml-2 top-2 w-56 p-2 bg-slate-900 text-white rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity z-40 pointer-events-none">
+                          <div className="font-medium text-xs">{milestone.statement}</div>
+                        </div>
+                        {/* Vertical Text */}
+                        <span className="[writing-mode:vertical-lr] rotate-180 text-white font-bold tracking-widest text-[10px] uppercase drop-shadow-md">
+                          Milestone
+                        </span>
+                      </div>
+
+                      {/* Trackers Container */}
+                      <div className="flex-1 p-2 flex flex-col gap-3">
+                        
+                        {/* Map 3: Trackers (Logs) */}
+                        {milestone.trackers.map((tracker) => (
+                          <LogCard 
+                            key={tracker.id}
+                            tracker={tracker}
+                            isFocused={focusedTrackerId === tracker.id}
+                            onFocus={() => setFocusedTrackerId(tracker.id)}
+                            onSave={(logData) => handleSaveLog(tracker.id, logData)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
 

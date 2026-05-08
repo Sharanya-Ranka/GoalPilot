@@ -10,7 +10,7 @@ sys.path.append(
 # breakpoint()
 
 
-from schemas.core_v2 import Goal
+from backend.src.schemas.core import Goal
 from agents.milestone_agent import commit_milestones
 from agents.agent_utils import PlanState
 

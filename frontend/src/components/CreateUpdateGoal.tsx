@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
 import EditableGoal from './EditableGoal';
-import type { GoalData } from '../types';
-import { emptyGoal } from '../constants';
+import type { Goal } from '../types';
+import { getEmptyGoal } from '../constants';
 import useTestStore from '../store/useTestStore';
+import { handleCreateGoal } from '../commService';
 
 
 // --- Main Component ---
@@ -11,6 +12,8 @@ export default function CreateUpdateGoal() {
   const editableGoal = useTestStore((state) => state.editableGoal);
   const setEditableGoal = useTestStore((state) => state.setEditableGoal);
   const userGoals = useTestStore((state) => state.userGoals);
+  const setUserGoals = useTestStore((state) => state.setUserGoals);
+  const userId = useTestStore((state) => state.userId);
   const setChatContext = useTestStore((state) => state.setChatContext);
   const setChatActiveState = useTestStore((state) => state.setChatActiveState);
 
@@ -25,7 +28,7 @@ export default function CreateUpdateGoal() {
 
   // Filter goals based on user input
   const filteredGoals = userGoals.filter(goal => 
-    goal.title.toLowerCase().includes(searchQuery.toLowerCase())
+    goal.description.toLowerCase().includes(searchQuery.toLowerCase()) || goal.title.toLowerCase().includes(searchQuery.toLowerCase()) 
   );
 
   // Handle clicking outside to close the searchable dropdown
@@ -40,14 +43,14 @@ export default function CreateUpdateGoal() {
   }, []);
 
   const handleCreateNew = () => {
-    setEditableGoal(emptyGoal);
+    setEditableGoal(getEmptyGoal());
     setSearchQuery('');
     setMode('create');
   };
 
-  const handleSelectGoal = (goal: GoalData) => {
+  const handleSelectGoal = (goal: Goal) => {
     setEditableGoal(goal);
-    setSearchQuery(goal.title); // Update input to show selected goal
+    setSearchQuery(goal.description); // Update input to show selected goal
     setIsDropdownOpen(false);
     setChatActiveState(false);
     setMode('update');
@@ -59,7 +62,13 @@ export default function CreateUpdateGoal() {
     setChatContext(chatHeading);
   };
 
-  console.log('Selected Goal:', editableGoal);
+  const handleOnSave = async () => {
+    
+    const newUserData = await handleCreateGoal(userId, editableGoal);
+    setUserGoals(newUserData)
+  }
+
+  // console.log('Selected Goal:', editableGoal);
 
   return (
     <div className="max-w-4xl mx-auto p-8 animate-in fade-in duration-500">
@@ -149,7 +158,7 @@ export default function CreateUpdateGoal() {
       {/* Save Button Area */}
       <div className="mt-8 flex justify-end">
         <button 
-          onClick={() => {}}
+          onClick={handleOnSave}
           className="px-8 py-3 bg-slate-900 text-white font-bold rounded-xl shadow-md hover:bg-slate-800 transition-colors"
         >
           Save Goal

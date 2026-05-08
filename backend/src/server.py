@@ -1,70 +1,166 @@
 # server.py
-import sqlite3
-from fastapi import FastAPI, HTTPException, Depends
+import boto3
+import uvicorn
+from fastapi import FastAPI, HTTPException, Depends, APIRouter, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Body
+from typing import List, Optional
+from agents.agent_graph import build_goal_app
+from agents.agent_utils import initialize_state
+from langgraph_checkpoint_aws import DynamoDBSaver
+from langgraph.graph import StateGraph
 from langchain_core.messages import HumanMessage
-from langgraph.checkpoint.sqlite import SqliteSaver
+import logging
+import json
 
-# --- Imports from our shared modules ---
-from persistence.tinydb_database import GoalRepository  # The DB Logic
-from schemas.core import (  # The Data Models
-    UserRequest,
-    StateResponse,
+# --- Imports ---
+# Assumes you have the updated DynamoDBHandler and Pydantic models in these files
+from persistence.dynamodb_database import DynamoDBHandler
+from schemas.core import (
     Goal,
     Milestone,
-    TrackerUpdate,
+    Tracker,
+    Log,
+    UserRequest,
 )
 
-# from agents.test_agent import build_goal_app
-from agents.agent_graph import build_goal_app  # The Agent Graph Factory
-from agents.agent_utils import initialize_state
+# Initialize App
+app = FastAPI(title="Goal Tracker API", version="2.0")
 
-app = FastAPI()
+# Define the origins that are allowed to talk to your API
+# Adjust the ports depending on what your frontend uses (e.g., React is usually 3000, Vite is 5173)
+origins = [
+    "http://localhost",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://localhost:8080",
+]
 
-# --- 1. Setup Global State ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods (GET, POST, PUT, OPTIONS, etc.)
+    allow_headers=["*"],  # Allows all headers
+)
 
-# A. LangGraph Persistence (Checkpoints)
-conn = sqlite3.connect("goal_app_state.db", check_same_thread=False)
-checkpointer = SqliteSaver(conn)
+
+my_session = boto3.session.Session(
+    region_name="us-east-1",  # Specify the region
+)
+
+# Initialize the saver (make sure you've created the table first or set logic to create it)
+checkpointer = DynamoDBSaver(
+    table_name="my_graph_checkpoints",
+    region_name="us-east-1",
+    enable_checkpoint_compression=True,
+    session=my_session,
+)
 agent_graph = build_goal_app(checkpointer)
+logging.getLogger(
+    "langgraph_checkpoint_aws.checkpoint.dynamodb.unified_repository"
+).setLevel(logging.WARNING)
 
-# B. Business Data Persistence (The Repository)
-# We initialize this once. It handles its own connections.
-repo = GoalRepository()
-
-# --- 2. API Endpoints: Chat & Graph State ---
-
-
-@app.get("/")
-def health_check():
-    return {"status": "running", "service": "Goal Tracker API"}
+logging.basicConfig(level=logging.INFO)
 
 
-@app.get("/state")
-def get_state(thread_id: str = None, last_n_messages: int = 5):
-    config = {"configurable": {"thread_id": thread_id}}
-    current_state = agent_graph.get_state(config)
-
-    if not current_state.values:
-        return {"error": "No state found for this thread"}
-
-    all_messages = current_state.values.get("messages", [])
-
-    # Format messages for the client
-    formatted_msgs = [
-        f"{msg.type}: {msg.content}" for msg in all_messages[-last_n_messages:]
-    ]
-
-    return StateResponse(
-        thread_id=thread_id,
-        messages=formatted_msgs,
-        current_step=str(current_state.next),
-        concrete_goal=current_state.values.get("concrete_goal"),
-        milestones=current_state.values.get("milestones"),
-    )
+# --- Dependency Injection ---
+# This allows you to swap DynamoDB for TinyDB or MockDB easily in tests
+def get_db_handler():
+    # In production, you might cache this connection
+    return DynamoDBHandler(region_name="us-east-1")
 
 
-@app.post("/chat")
-def chat_endpoint(req: UserRequest):
+# --- 1. The Dashboard / Aggregate Router (Optimized for Frontend) ---
+dashboard_router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
+
+
+@dashboard_router.get("/{user_id}")
+def get_user_dashboard(user_id: str, db: DynamoDBHandler = Depends(get_db_handler)):
+    """
+    The 'One-Shot' endpoint. Fetches Goals, Milestones, and Trackers
+    and stitches them into a hierarchy for the mobile app home screen.
+    """
+    try:
+        return db.get_user_data(user_id)
+    except Exception as e:
+        # breakpoint()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- 2. Goals Router ---
+goals_router = APIRouter(prefix="/goals", tags=["Goals"])
+
+
+@goals_router.post("/")
+def create_goal(
+    goal: Goal = Body(...),
+    user_id: str = Body(...),  # Explicitly pull user_id from the JSON body
+    db: DynamoDBHandler = Depends(get_db_handler),
+):
+    try:
+        user_new_data = db.process_operation(
+            user_id=user_id, operation=dict(action="create_goal", payload=goal)
+        )
+        return user_new_data
+    except Exception as e:
+        print(str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@goals_router.get("/{user_id}")
+def list_goals(user_id: str, db: DynamoDBHandler = Depends(get_db_handler)):
+    goals = json.loads(db.get_user_data(user_id=user_id)["goals"])
+    return goals
+
+
+@goals_router.put("/{goal_id}")
+def update_goal(
+    goal_id: str, goal: Goal, db: DynamoDBHandler = Depends(get_db_handler)
+):
+    # Ensure the payload ID matches the URL ID for safety
+    if goal.goal_id != goal_id:
+        raise HTTPException(status_code=400, detail="ID mismatch in payload")
+    db.update_goal(goal)
+    return {"status": "updated", "goal_id": goal_id}
+
+
+# --- 5. Logs / History Router ---
+logs_router = APIRouter(prefix="/logs", tags=["Logs"])
+
+
+@logs_router.post("/")
+def log_progress(
+    log: Log = Body(...),
+    user_id: str = Body(...),  # Explicitly pull user_id from the JSON body
+    tracker_id: str = Body(...),
+    db: DynamoDBHandler = Depends(get_db_handler),
+):
+    """
+    Logs a data point.
+    Payload: { "user_id": "...", "tracker_id": "...", "value": 10 }
+    """
+    try:
+        # breakpoint()
+        user_new_data = db.process_operation(
+            user_id=user_id,
+            operation={
+                "action": "log_update",
+                "tracker_id": tracker_id,
+                "payload": log,
+            },
+        )
+        return user_new_data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- 6. AI Agent Router (Kept Separate) ---
+ai_router = APIRouter(prefix="/ai", tags=["AI Agent"])
+
+
+@ai_router.post("/chat")
+def agent_chat(req: UserRequest):
     config = {"configurable": {"thread_id": req.thread_id}}
     current_state = agent_graph.get_state(config)
 
@@ -77,109 +173,36 @@ def chat_endpoint(req: UserRequest):
         # Run the agent
         result = agent_graph.invoke(
             {
-                "last_user_message": HumanMessage(content=req.message),
+                "message_from_user": req.message,
                 "user_id": req.thread_id,
             },
             config,
         )
 
+        # breakpoint()
+        logging.info(f"Final state after invocation {req.thread_id}:\n{result}")
+
         return {
-            "response": result["current_context"][-1].content,
+            "response": result["message_to_user"],
             "thread_id": req.thread_id,
+            "structured_data": result.get("structured_data", {}),
         }
     except Exception as e:
+        logging.error(f"Error in AI Chat\n{str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# --- 3. API Endpoints: Database / Goal Management ---
-# These bypass the LLM and talk directly to the SQLite Repository
+# --- Register Routes ---
+app.include_router(dashboard_router)
+app.include_router(goals_router)
+app.include_router(logs_router)
+app.include_router(ai_router)
 
 
-@app.post("/goals")
-def create_goal_endpoint(goal: Goal):
-    """
-    Directly creates a goal (and its milestones) in the DB.
-    Usage: Client sends a JSON matching the 'Goal' schema.
-    """
-    try:
-        goal_id = repo.create_goal(goal)
-        return {"status": "success", "goal_id": goal_id}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/milestones")
-def create_milestone_endpoint(m: Milestone, goal_id: str):
-    """
-    Adds a milestone to an existing goal.
-    """
-    try:
-        ms_id = repo.create_milestone(m, goal_id)
-        return {"status": "success", "milestone_id": ms_id}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/trackers/log")
-def log_tracker_endpoint(update: TrackerUpdate, goal_id: str):
-    """
-    Logs user progress (history) for a specific tracker.
-    Input: { "tracker_id": "...", "value": 10, "date": "2025-02-01" }
-    """
-    try:
-        repo.update_tracking_history(update, goal_id)
-        return {"status": "updated", "tracker_id": update.tracker_id}
-    except ValueError as e:
-        # Handle "Tracker not found" specifically
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/goals/{user_id}", response_model=list[Goal])
-def get_user_goals(user_id: str):
-    """
-    Retrieves all goals belonging to a specific user.
-    """
-    try:
-        goals = repo.get_goals_by_user(user_id)
-        if not goals:
-            return []
-        return goals
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.put("/goals/{goal_id}")
-def update_goal_endpoint(goal_id: str, goal_update: Goal):
-    """
-    Updates an existing goal's metadata or specification.
-    """
-    try:
-        # Assuming repo.update_goal handles the logic of merging/replacing
-        success = repo.update_goal(goal_id, goal_update)
-        if not success:
-            raise HTTPException(status_code=404, detail="Goal not found")
-        return {"status": "success", "goal_id": goal_id}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.put("/milestones/{milestone_id}")
-def update_milestone_endpoint(milestone_id: str, milestone_update: Milestone):
-    """
-    Updates a specific milestone's status, deadline, or description.
-    """
-    try:
-        success = repo.update_milestone(milestone_id, milestone_update)
-        if not success:
-            raise HTTPException(status_code=404, detail="Milestone not found")
-        return {"status": "success", "milestone_id": milestone_id}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@app.get("/")
+def health_check():
+    return {"status": "running", "service": "Goal Tracker API v2"}
 
 
 if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run("server:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)

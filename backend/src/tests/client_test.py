@@ -1,6 +1,6 @@
 import requests
 from datetime import datetime
-from src.schemas.core_v2 import (
+from backend.src.schemas.core import (
     Goal,
     Milestone,
     Tracker,

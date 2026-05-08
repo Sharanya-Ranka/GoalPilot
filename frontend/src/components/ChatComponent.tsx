@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import useTestStore from '../store/useTestStore';
-import { handleSendChatMessage } from '../chatService';
+import { handleSendChatMessage } from '../commService';
 
 export interface ChatMessage {
   id: string;
@@ -9,20 +9,20 @@ export interface ChatMessage {
 }
 
 interface ChatComponentProps {
-  apiUrl?: string; // URL to send messages to
 }
 
-export default function ChatComponent({ apiUrl = 'https://api.example.com/chat' }: ChatComponentProps) {
+export default function ChatComponent({  }: ChatComponentProps) {
 //   const [isOpen, setIsOpen] = useState(false);
   const isOpen = useTestStore((state) => state.chatIsActive);
   const setIsOpen = useTestStore((state) => state.setChatActiveState);
   const chatContext = useTestStore((state) => state.chatContext);
   const setEditableGoal = useTestStore((state) => state.setEditableGoal); 
+
+  const userThreadId = useTestStore((state) => state.userThreadId);
   
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  console.log(apiUrl)
   // Resizing State
   const [size, setSize] = useState({ width: 350, height: 450 });
   const isResizing = useRef(false);
@@ -63,32 +63,6 @@ export default function ChatComponent({ apiUrl = 'https://api.example.com/chat' 
     };
   }, []);
 
-  // // Listen for changes in chatContext to trigger contextual agent messages
-  // useEffect(() => {
-  //   if (!chatContext) return;
-
-  //   const contextLower = chatContext.toLowerCase();
-  //   let newContent = '';
-
-  //   if (contextLower === 'create new goal') {
-  //     newContent = "Please describe the goal you want to create";
-  //   } else if (contextLower === 'update goal') {
-  //     newContent = "Please describe the updates you want to make to the goal";
-  //   }
-
-  //   // if (newContent) {
-  //   //   setMessages(prev => [
-  //   //     ...prev, 
-  //   //     { id: crypto.randomUUID(), role: 'agent', content: newContent }
-  //   //   ]);
-  //   // }
-
-  //   if (newContent) {
-  //     setMessages([
-  //       { id: crypto.randomUUID(), role: 'agent', content: newContent }
-  //     ]);
-  //   }
-  // }, [chatContext]);
 
   const sendMessage = async () => {
     if (!inputValue.trim()) return;
@@ -101,7 +75,8 @@ export default function ChatComponent({ apiUrl = 'https://api.example.com/chat' 
 
     // Call your extracted network script (which handles its own try/catch)
     // We expect it to return: { reply: string, editableGoal: GoalData | null }
-    const responseData = await handleSendChatMessage(newUserMsg.content, chatContext); 
+    const responseData = await handleSendChatMessage(newUserMsg.content, chatContext, userThreadId); 
+    console.log("Response received", responseData)
     
     // 1. Update the chat window with the agent's message
     setMessages(prev => [...prev, { 

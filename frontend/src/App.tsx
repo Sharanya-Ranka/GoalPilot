@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import CreateUpdateGoal from './components/CreateUpdateGoal';
 import ChatComponent from './components/ChatComponent'; 
 import useTestStore from './store/useTestStore';
 import LogProgress from './components/LogProgress';
+import TodaysPlan from './components/TodaysPlan';
+import { getUserGoals } from './commService';
 // --- 1. Page Components ---
 // In a real app, these would be in separate files (e.g., src/pages/TodaysPlan.tsx)
 // const CreateUpdateGoal = () => (
@@ -14,14 +16,14 @@ import LogProgress from './components/LogProgress';
 //   </div>
 // );
 
-const TodaysPlan = () => (
-  <div className="max-w-4xl mx-auto p-8 animate-in fade-in duration-500">
-    <h1 className="text-3xl font-bold text-gray-800 mb-6">Today's Plan 📅</h1>
-    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-      <p className="text-gray-600">Your daily schedule and actionable tasks will go here.</p>
-    </div>
-  </div>
-);
+// const TodaysPlan = () => (
+//   <div className="max-w-4xl mx-auto p-8 animate-in fade-in duration-500">
+//     <h1 className="text-3xl font-bold text-gray-800 mb-6">Today's Plan 📅</h1>
+//     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+//       <p className="text-gray-600">Your daily schedule and actionable tasks will go here.</p>
+//     </div>
+//   </div>
+// );
 
 // const LogProgress = () => (
 //   <div className="max-w-4xl mx-auto p-8 animate-in fade-in duration-500">
@@ -37,6 +39,27 @@ export default function App() {
   // State to track which page is currently active
   const [activePage, setActivePage] = useState<string>('today');
   const setChatActiveState = useTestStore((state) => state.setChatActiveState);
+  const setUserGoals = useTestStore((state) => state.setUserGoals);
+  const userId = useTestStore((state) => state.userId);
+
+  useEffect(() => {
+    // 1. Define the async function inside the effect
+    const fetchGoals = async () => {
+      try {
+        const userGoals = await getUserGoals(userId);
+        setUserGoals(userGoals);
+      } catch (error) {
+        // It's always a good idea to handle potential network errors
+        console.error("Failed to fetch user goals:", error);
+      }
+    };
+
+    // 2. Call the function immediately
+    fetchGoals();
+
+    // 3. Include any variables used inside the effect in the dependency array
+  }, []);
+  
 
   // Navigation configuration
   const navItems = [
@@ -117,7 +140,7 @@ export default function App() {
         {renderContent()}
       </main>
 
-      <ChatComponent apiUrl="https://your-backend-api.com/chat" />
+      <ChatComponent />
       
     </div>
   );

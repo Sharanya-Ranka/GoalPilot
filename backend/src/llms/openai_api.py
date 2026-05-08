@@ -39,9 +39,7 @@ logger = logging.getLogger(__name__)
 def low_reasoning_gpt5mini(context):
     logger.info("Invoking LLM (gpt-5-mini)...")
     try:
-        llm = ChatOpenAI(
-            model="gpt-5-mini", temperature=0.3, reasoning_effort="minimal"
-        )
+        llm = ChatOpenAI(model="gpt-5-mini", temperature=0.3, reasoning_effort="low")
         response = llm.invoke(context)
         logger.info(
             f"LLM response received successfully.\n{response.content}\n{response.usage_metadata}"
